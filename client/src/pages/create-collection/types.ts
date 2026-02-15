@@ -1,6 +1,12 @@
-import { Layers, Gem, Users, Crown, Store, type LucideIcon } from "lucide-react";
+import { Layers, Gem, Users, Crown, Store, Infinity, type LucideIcon } from "lucide-react";
 
 export const STEPS = ["Contract Style", "Configuration", "Review", "Deploy"];
+
+export const BOWERS_STYLE_IDS = ["bowers-marketplace", "bowers-open-edition"] as const;
+
+export function isBowersStyle(styleId: string): boolean {
+  return (BOWERS_STYLE_IDS as readonly string[]).includes(styleId);
+}
 
 export interface WizardState {
   styleId: string;
@@ -40,4 +46,5 @@ export const styleIcons: Record<string, LucideIcon> = {
   "fa2-multiminter": Users,
   "fa2-full": Crown,
   "bowers-marketplace": Store,
+  "bowers-open-edition": Infinity,
 };

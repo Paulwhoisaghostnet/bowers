@@ -16,6 +16,8 @@ export interface OriginateParams {
   minOfferPerUnitMutez?: number;
 }
 
+const BOWERS_STYLE_IDS = ["bowers-marketplace", "bowers-open-edition"];
+
 export async function buildFA2Storage(params: OriginateParams) {
   const { MichelsonMap } = await loadTaquito();
   const { char2Bytes } = await loadUtils();
@@ -37,8 +39,8 @@ export async function buildFA2Storage(params: OriginateParams) {
 
   const styleId = params.style.id;
 
-  if (styleId === "bowers-marketplace") {
-    return buildBowersStorage(params, ledger, operators, tokenMetadata, contractMetadata);
+  if (BOWERS_STYLE_IDS.includes(styleId)) {
+    return buildBowersStorage(params, styleId, ledger, operators, tokenMetadata, contractMetadata);
   }
 
   const hasMultiMinter = styleId === "fa2-multiminter" || styleId === "fa2-full";
@@ -76,6 +78,7 @@ export async function buildFA2Storage(params: OriginateParams) {
 
 async function buildBowersStorage(
   params: OriginateParams,
+  styleId: string,
   ledger: any,
   operators: any,
   tokenMetadata: any,
@@ -98,12 +101,21 @@ async function buildBowersStorage(
     max_buy_qty: new MichelsonMap(),
     min_offer_bps_of_list: new MichelsonMap(),
     offers: new MichelsonMap(),
-    offer_rejections: new MichelsonMap(),
     claimable: new MichelsonMap(),
     blacklist: new MichelsonMap(),
     token_owners: new MichelsonMap(),
     owner_count: new MichelsonMap(),
   };
+
+  if (styleId === "bowers-marketplace") {
+    storage.offer_rejections = new MichelsonMap();
+  }
+
+  if (styleId === "bowers-open-edition") {
+    storage.minting_paused = false;
+    storage.token_supply = new MichelsonMap();
+    storage.token_config = new MichelsonMap();
+  }
 
   return storage;
 }
@@ -112,7 +124,7 @@ export async function originateContract(params: OriginateParams): Promise<string
   const t = await getTezos();
   const { getFA2Michelson, validateMichelson } = await import("../fa2");
 
-  const isBowers = params.style.id === "bowers-marketplace";
+  const isBowers = BOWERS_STYLE_IDS.includes(params.style.id);
 
   if (!isBowers) {
     const validation = validateMichelson(params.style.id);
@@ -125,7 +137,7 @@ export async function originateContract(params: OriginateParams): Promise<string
     const storage = await buildFA2Storage(params);
 
     if (isBowers) {
-      throw new Error("BowersFA2 contract origination requires pre-compiled Michelson (coming soon)");
+      throw new Error("Bowers contract origination requires pre-compiled Michelson (coming soon)");
     }
 
     const code = getFA2Michelson(params.style.id);

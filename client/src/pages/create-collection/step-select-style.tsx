@@ -1,6 +1,7 @@
 import { CONTRACT_STYLES } from "@shared/schema";
 import { StyleCard } from "./style-card";
 import type { WizardState } from "./types";
+import { isBowersStyle } from "./types";
 
 export function StepSelectStyle({
   state,
@@ -25,7 +26,7 @@ export function StepSelectStyle({
               const s = CONTRACT_STYLES.find((cs) => cs.id === style.id)!;
               onChange({
                 styleId: style.id,
-                royaltiesEnabled: s.entrypoints.setRoyalties !== undefined || style.id === "bowers-marketplace",
+                royaltiesEnabled: s.entrypoints.setRoyalties !== undefined || isBowersStyle(style.id),
                 minterListEnabled: s.entrypoints.addMinter !== undefined,
               });
             }}

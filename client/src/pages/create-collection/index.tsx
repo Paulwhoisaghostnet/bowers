@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { CONTRACT_STYLES } from "@shared/schema";
 import { motion, AnimatePresence } from "framer-motion";
-import { type WizardState, defaultState, STEPS, isValidTezosAddress } from "./types";
+import { type WizardState, defaultState, STEPS, isValidTezosAddress, isBowersStyle } from "./types";
 import { StepIndicator } from "./step-indicator";
 import { StepSelectStyle } from "./step-select-style";
 import { StepConfigure } from "./step-configure";
@@ -32,7 +32,7 @@ export default function CreateCollection() {
     if (step === 0) return !!state.styleId;
     if (step === 1) {
       if (!state.name || !state.symbol) return false;
-      if (state.styleId === "bowers-marketplace") {
+      if (isBowersStyle(state.styleId)) {
         return isValidTezosAddress(state.royaltyRecipient) && state.royaltyBps >= 0 && state.royaltyBps <= 10000 && state.minOfferPerUnitMutez > 0;
       }
       return true;
@@ -46,7 +46,7 @@ export default function CreateCollection() {
 
       const style = CONTRACT_STYLES.find((s) => s.id === state.styleId)!;
 
-      const isBowers = state.styleId === "bowers-marketplace";
+      const isBowers = isBowersStyle(state.styleId);
       let kt1: string;
       try {
         kt1 = await originateContract({

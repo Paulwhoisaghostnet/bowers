@@ -3,12 +3,13 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CONTRACT_STYLES } from "@shared/schema";
 import type { WizardState } from "./types";
-import { styleIcons } from "./types";
+import { styleIcons, isBowersStyle } from "./types";
 
 export function StepReview({ state }: { state: WizardState }) {
   const selectedStyle = CONTRACT_STYLES.find((s) => s.id === state.styleId);
   const Icon = styleIcons[state.styleId] || Hexagon;
-  const isBowersMarketplace = state.styleId === "bowers-marketplace";
+  const isBowers = isBowersStyle(state.styleId);
+  const isOpenEdition = state.styleId === "bowers-open-edition";
 
   const items = [
     { label: "Contract Style", value: selectedStyle?.name || "" },
@@ -16,7 +17,11 @@ export function StepReview({ state }: { state: WizardState }) {
     { label: "Symbol", value: state.symbol },
   ];
 
-  if (isBowersMarketplace) {
+  if (isBowers) {
+    if (isOpenEdition) {
+      items.push({ label: "Minting Model", value: "Open Edition (public minting)" });
+      items.push({ label: "Offer Expiry", value: "Fixed 7-day auto-expiry" });
+    }
     items.push(
       { label: "Royalty Rate", value: `${state.royaltyBps} bps (${(state.royaltyBps / 100).toFixed(2)}%)` },
       { label: "Royalty Recipient", value: state.royaltyRecipient ? `${state.royaltyRecipient.slice(0, 10)}...${state.royaltyRecipient.slice(-6)}` : "Not set" },
@@ -70,9 +75,9 @@ export function StepReview({ state }: { state: WizardState }) {
           ))}
         </div>
 
-        {isBowersMarketplace && (
+        {isBowers && (
           <div className="mt-5 pt-4 border-t">
-            <p className="text-xs text-muted-foreground mb-2">Marketplace Entrypoints</p>
+            <p className="text-xs text-muted-foreground mb-2">Contract Features</p>
             <div className="flex flex-wrap gap-1">
               {selectedStyle?.features.map((f) => (
                 <Badge key={f} variant="outline" className="text-[10px]">{f}</Badge>
