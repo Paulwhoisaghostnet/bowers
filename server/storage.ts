@@ -1,38 +1,45 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import { type Contract, type InsertContract, contracts } from "@shared/schema";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  getContractsByOwner(ownerAddress: string): Promise<Contract[]>;
+  getContractById(id: string): Promise<Contract | undefined>;
+  createContract(data: InsertContract): Promise<Contract>;
+  incrementTokenCount(id: string): Promise<Contract | undefined>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
+export class DatabaseStorage implements IStorage {
+  async getContractsByOwner(ownerAddress: string): Promise<Contract[]> {
+    return await db
+      .select()
+      .from(contracts)
+      .where(eq(contracts.ownerAddress, ownerAddress));
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async getContractById(id: string): Promise<Contract | undefined> {
+    const [contract] = await db
+      .select()
+      .from(contracts)
+      .where(eq(contracts.id, id));
+    return contract;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async createContract(data: InsertContract): Promise<Contract> {
+    const [contract] = await db.insert(contracts).values(data).returning();
+    return contract;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async incrementTokenCount(id: string): Promise<Contract | undefined> {
+    const existing = await this.getContractById(id);
+    if (!existing) return undefined;
+    const [updated] = await db
+      .update(contracts)
+      .set({ tokenCount: (existing.tokenCount || 0) + 1 })
+      .where(eq(contracts.id, id))
+      .returning();
+    return updated;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
