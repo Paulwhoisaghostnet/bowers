@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { CONTRACT_STYLES } from "@shared/schema";
 import { motion, AnimatePresence } from "framer-motion";
-import { type WizardState, defaultState, STEPS } from "./types";
+import { type WizardState, defaultState, STEPS, isValidTezosAddress } from "./types";
 import { StepIndicator } from "./step-indicator";
 import { StepSelectStyle } from "./step-select-style";
 import { StepConfigure } from "./step-configure";
@@ -30,7 +30,13 @@ export default function CreateCollection() {
 
   const canProceed = () => {
     if (step === 0) return !!state.styleId;
-    if (step === 1) return !!state.name && !!state.symbol;
+    if (step === 1) {
+      if (!state.name || !state.symbol) return false;
+      if (state.styleId === "bowers-marketplace") {
+        return isValidTezosAddress(state.royaltyRecipient) && state.royaltyBps >= 0 && state.royaltyBps <= 10000 && state.minOfferPerUnitMutez > 0;
+      }
+      return true;
+    }
     return true;
   };
 
@@ -40,17 +46,23 @@ export default function CreateCollection() {
 
       const style = CONTRACT_STYLES.find((s) => s.id === state.styleId)!;
 
+      const isBowers = state.styleId === "bowers-marketplace";
       let kt1: string;
       try {
         kt1 = await originateContract({
           name: state.name,
           symbol: state.symbol,
           admin: address,
-          royaltiesEnabled: state.royaltiesEnabled,
-          royaltyPercent: state.royaltiesEnabled ? state.royaltyPercent : 0,
+          royaltiesEnabled: isBowers ? true : state.royaltiesEnabled,
+          royaltyPercent: isBowers ? Math.round(state.royaltyBps / 100) : (state.royaltiesEnabled ? state.royaltyPercent : 0),
           minterListEnabled: state.minterListEnabled,
           metadataBaseUri: state.metadataBaseUri,
           style,
+          ...(isBowers && {
+            royaltyBps: state.royaltyBps,
+            royaltyRecipient: state.royaltyRecipient,
+            minOfferPerUnitMutez: state.minOfferPerUnitMutez,
+          }),
         });
       } catch {
         kt1 = `KT1${Array.from({ length: 33 }, () =>
@@ -67,9 +79,9 @@ export default function CreateCollection() {
         ownerAddress: address,
         name: state.name,
         symbol: state.symbol,
-        adminModel: state.adminModel,
-        royaltiesEnabled: state.royaltiesEnabled,
-        royaltyPercent: state.royaltiesEnabled ? state.royaltyPercent : 0,
+        adminModel: isBowers ? "single" : state.adminModel,
+        royaltiesEnabled: isBowers ? true : state.royaltiesEnabled,
+        royaltyPercent: isBowers ? Math.round(state.royaltyBps / 100) : (state.royaltiesEnabled ? state.royaltyPercent : 0),
         minterListEnabled: state.minterListEnabled,
         metadataBaseUri: state.metadataBaseUri,
         network: "ghostnet",
@@ -78,6 +90,11 @@ export default function CreateCollection() {
         options: {
           features: style.features,
           entrypoints: style.entrypoints,
+          ...(isBowers && {
+            royaltyBps: state.royaltyBps,
+            royaltyRecipient: state.royaltyRecipient,
+            minOfferPerUnitMutez: state.minOfferPerUnitMutez,
+          }),
         },
       });
       return await res.json();

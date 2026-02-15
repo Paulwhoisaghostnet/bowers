@@ -104,7 +104,10 @@ Bowers is a Tezos NFT marketplace with social features. Artists can deploy FA2-c
 ## Important Notes
 - Beacon SDK and Taquito are lazy-loaded via dynamic import() to avoid "global is not defined" errors in Vite
 - index.html includes polyfill script for global/Buffer/process
-- 4 contract styles: FA2 Basic, FA2 + Royalties, FA2 Multi-Minter, FA2 Complete
+- 5 contract styles: FA2 Basic, FA2 + Royalties, FA2 Multi-Minter, FA2 Complete, Bowers Marketplace (recommended)
+- BowersFA2 Marketplace contract has marketplace-specific config: royaltyBps (basis points), royaltyRecipient (tez address), minOfferPerUnitMutez
+- BowersFA2 entrypoints include: set_price, clear_price, buy, make_offer, accept_offer, reject_offer, cancel_offer, sweep_expired_offer, withdraw, blacklist_address, unblacklist_address, set_max_buy_qty, set_min_offer_percent_of_list
+- BowersFA2 origination builds custom storage with marketplace big_maps (prices, offers, claimable, blacklist, etc.)
 - Default network: Ghostnet (testnet)
 - Auth routes handled by Replit integration: /api/login, /api/logout, /api/callback, /api/auth/user
 - Default queryFn in queryClient uses queryKey.join("/") as the fetch URL — queryKeys with path segments work, but query params need custom queryFn
@@ -115,3 +118,4 @@ Bowers is a Tezos NFT marketplace with social features. Artists can deploy FA2-c
 - Initial MVP build (Feb 2026): Full wizard flow, dashboard, mint page, config download
 - Modularization (Feb 2026): Split monolithic files into focused modules with barrel exports
 - Social features (Feb 2026): Added Replit Auth, bowers, wallets, friendships, followers, landing page, marketplace
+- BowersFA2 Integration (Feb 2026): Added Bowers Marketplace as recommended contract style with marketplace-specific config (royaltyBps, royaltyRecipient, minOfferPerUnitMutez), Tezos address validation, expanded origination with BowersFA2-specific storage

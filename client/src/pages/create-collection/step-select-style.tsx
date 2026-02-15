@@ -25,7 +25,7 @@ export function StepSelectStyle({
               const s = CONTRACT_STYLES.find((cs) => cs.id === style.id)!;
               onChange({
                 styleId: style.id,
-                royaltiesEnabled: s.entrypoints.setRoyalties !== undefined,
+                royaltiesEnabled: s.entrypoints.setRoyalties !== undefined || style.id === "bowers-marketplace",
                 minterListEnabled: s.entrypoints.addMinter !== undefined,
               });
             }}

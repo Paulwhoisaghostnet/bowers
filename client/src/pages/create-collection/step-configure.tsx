@@ -2,8 +2,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { CONTRACT_STYLES } from "@shared/schema";
+import { useWallet } from "@/lib/wallet-context";
 import type { WizardState } from "./types";
+import { isValidTezosAddress } from "./types";
 
 export function StepConfigure({
   state,
@@ -13,6 +16,8 @@ export function StepConfigure({
   onChange: (updates: Partial<WizardState>) => void;
 }) {
   const selectedStyle = CONTRACT_STYLES.find((s) => s.id === state.styleId);
+  const isBowersMarketplace = state.styleId === "bowers-marketplace";
+  const { address } = useWallet();
 
   return (
     <div>
@@ -46,20 +51,102 @@ export function StepConfigure({
           <p className="text-xs text-muted-foreground">Short identifier for your tokens (max 8 chars)</p>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="adminModel">Admin Model</Label>
-          <Select value={state.adminModel} onValueChange={(v) => onChange({ adminModel: v })}>
-            <SelectTrigger data-testid="select-admin-model">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="single">Single Admin</SelectItem>
-              <SelectItem value="multi">Multi-Sig Admin</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        {!isBowersMarketplace && (
+          <div className="space-y-2">
+            <Label htmlFor="adminModel">Admin Model</Label>
+            <Select value={state.adminModel} onValueChange={(v) => onChange({ adminModel: v })}>
+              <SelectTrigger data-testid="select-admin-model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="single">Single Admin</SelectItem>
+                <SelectItem value="multi">Multi-Sig Admin</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
-        {selectedStyle?.entrypoints.setRoyalties && (
+        {isBowersMarketplace && (
+          <>
+            <div className="rounded-md border p-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold">Marketplace Settings</h3>
+                <Badge variant="secondary" className="text-[10px]">Bowers</Badge>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="royaltyBps">Royalty Rate</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="royaltyBps"
+                    type="number"
+                    min={0}
+                    max={10000}
+                    value={state.royaltyBps}
+                    onChange={(e) => onChange({ royaltyBps: Math.min(10000, Math.max(0, parseInt(e.target.value) || 0)) })}
+                    className="w-28"
+                    data-testid="input-royalty-bps"
+                  />
+                  <span className="text-sm text-muted-foreground">bps</span>
+                  <span className="text-xs text-muted-foreground ml-2">({(state.royaltyBps / 100).toFixed(2)}%)</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Basis points (100 bps = 1%). Applied to all sales and accepted offers.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="royaltyRecipient">Royalty Recipient Address</Label>
+                <Input
+                  id="royaltyRecipient"
+                  placeholder="tz1..."
+                  value={state.royaltyRecipient}
+                  onChange={(e) => onChange({ royaltyRecipient: e.target.value })}
+                  data-testid="input-royalty-recipient"
+                />
+                {address && !state.royaltyRecipient && (
+                  <button
+                    className="text-xs text-primary hover:underline"
+                    onClick={() => onChange({ royaltyRecipient: address })}
+                    data-testid="button-use-my-wallet"
+                  >
+                    Use my wallet ({address.slice(0, 8)}...{address.slice(-4)})
+                  </button>
+                )}
+                {state.royaltyRecipient && !isValidTezosAddress(state.royaltyRecipient) && (
+                  <p className="text-xs text-destructive">
+                    Enter a valid Tezos address (tz1/tz2/tz3/KT1)
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Address that receives royalties from all sales. Typically your own wallet.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="minOfferPerUnit">Minimum Offer Per Token</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="minOfferPerUnit"
+                    type="number"
+                    min={1}
+                    value={state.minOfferPerUnitMutez}
+                    onChange={(e) => onChange({ minOfferPerUnitMutez: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="w-36"
+                    data-testid="input-min-offer-mutez"
+                  />
+                  <span className="text-sm text-muted-foreground">mutez</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Minimum amount (in mutez) a buyer must offer per token unit. 1,000,000 mutez = 1 tez.
+                  Current: {(state.minOfferPerUnitMutez / 1000000).toFixed(6)} tez
+                </p>
+              </div>
+            </div>
+          </>
+        )}
+
+        {!isBowersMarketplace && selectedStyle?.entrypoints.setRoyalties && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
@@ -93,7 +180,7 @@ export function StepConfigure({
           </div>
         )}
 
-        {selectedStyle?.entrypoints.addMinter && (
+        {!isBowersMarketplace && selectedStyle?.entrypoints.addMinter && (
           <div className="flex items-center justify-between">
             <div>
               <Label>Minter Allowlist</Label>

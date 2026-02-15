@@ -31,9 +31,14 @@ export function StyleCard({
         >
           <Icon className="w-5 h-5" />
         </div>
-        <div className="flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="font-semibold text-sm">{style.name}</h3>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-sm">{style.name}</h3>
+              {style.recommended && (
+                <Badge variant="default" className="text-[10px]">Recommended</Badge>
+              )}
+            </div>
             <Badge variant="outline" className="text-[10px]">
               v{style.version}
             </Badge>
