@@ -11,16 +11,45 @@ MintCapsule is a no-code Tezos NFT collection contract deployment dApp. Artists 
 - **State**: @tanstack/react-query
 
 ## Key Files
-- `shared/schema.ts` - Database schema, contract styles, Zod validation
+
+### Shared (barrel: `shared/schema.ts`)
+- `shared/schema.ts` - Barrel re-export of all shared modules
+- `shared/db.ts` - Drizzle table definition, insert schema, types (Contract, InsertContract)
+- `shared/contract-styles.ts` - CONTRACT_STYLES array, ContractStyle type/schema
+- `shared/validation.ts` - MintRequest Zod schema
+
+### Server
 - `server/routes.ts` - API routes for contracts CRUD, minting, config download
-- `server/storage.ts` - Database storage layer
+- `server/storage.ts` - Database storage layer (IStorage interface)
 - `server/db.ts` - PostgreSQL connection
 - `server/seed.ts` - Seed data for demo contracts
+
+### Client - Tezos Integration (barrel: `client/src/lib/tezos/index.ts`)
+- `client/src/lib/tezos/loaders.ts` - Lazy-load Taquito, Beacon, michel-codec, tzip12/16, utils
+- `client/src/lib/tezos/wallet.ts` - getTezos, getWallet, connectWallet, disconnectWallet, getActiveAccount, shortenAddress
+- `client/src/lib/tezos/originate.ts` - buildFA2Storage, originateContract (contract deployment)
+- `client/src/lib/tezos/mint.ts` - mintToken (token minting via wallet)
+- `client/src/lib/tezos/metadata.ts` - getTokenMetadata, getContractMetadata, parseMichelson
+
+### Client - FA2 Michelson (barrel: `client/src/lib/fa2/index.ts`)
+- `client/src/lib/fa2/types.ts` - FA2_TYPES (tokenMetadataValue, transferParam, updateOperatorsParam, balanceOfParam)
+- `client/src/lib/fa2/parameter.ts` - buildMintParam, buildParameter (Michelson parameter section)
+- `client/src/lib/fa2/storage.ts` - buildStorageType (Michelson storage section)
+- `client/src/lib/fa2/code.ts` - buildCode, buildIfLeftTree (Michelson code section)
+- `client/src/lib/fa2/validation.ts` - getFA2Michelson, getFA2MichelineString, validateMichelson
+
+### Client - Pages
 - `client/src/App.tsx` - Root layout with sidebar
-- `client/src/lib/tezos.ts` - Tezos wallet & contract adapter (lazy imports)
 - `client/src/lib/wallet-context.tsx` - React wallet state context
 - `client/src/pages/dashboard.tsx` - My Contracts view
-- `client/src/pages/create-collection.tsx` - Wizard for deploying new contracts
+- `client/src/pages/create-collection/index.tsx` - Wizard orchestration (state, navigation, deploy)
+- `client/src/pages/create-collection/types.ts` - WizardState, STEPS, styleIcons, defaultState
+- `client/src/pages/create-collection/step-indicator.tsx` - Step progress bar component
+- `client/src/pages/create-collection/style-card.tsx` - Contract style selection card
+- `client/src/pages/create-collection/step-select-style.tsx` - Step 1: Choose contract style
+- `client/src/pages/create-collection/step-configure.tsx` - Step 2: Configure collection details
+- `client/src/pages/create-collection/step-review.tsx` - Step 3: Review summary
+- `client/src/pages/create-collection/step-deploy.tsx` - Step 4: Deploy with wallet
 - `client/src/pages/mint-token.tsx` - Token minting UI
 
 ## API Routes
@@ -37,6 +66,8 @@ MintCapsule is a no-code Tezos NFT collection contract deployment dApp. Artists 
 - 4 contract styles: FA2 Basic, FA2 + Royalties, FA2 Multi-Minter, FA2 Complete
 - Default network: Ghostnet (testnet)
 - Seed data uses demo wallet address: tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb
+- All barrel files (schema.ts, tezos/index.ts, fa2/index.ts, create-collection/index.ts) maintain backward-compatible imports
 
 ## Recent Changes
 - Initial MVP build (Feb 2026): Full wizard flow, dashboard, mint page, config download
+- Modularization (Feb 2026): Split monolithic files into focused modules with barrel exports for better AI agent discoverability

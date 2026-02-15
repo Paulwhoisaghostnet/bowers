@@ -29,7 +29,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         const addr = await getActiveAccount();
         if (!cancelled && addr) setAddress(addr);
       } catch {
-        // Beacon SDK may fail to init on first load; that's OK
       }
     })();
     return () => { cancelled = true; };
@@ -53,7 +52,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const { disconnectWallet } = await import("./tezos");
       await disconnectWallet();
     } catch {
-      // ignore cleanup errors
     }
     setAddress(null);
   }, []);
