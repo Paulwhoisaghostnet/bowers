@@ -3,6 +3,10 @@ import type { ContractStyle } from "@shared/schema";
 let tezosModule: any = null;
 let beaconModule: any = null;
 let walletModule: any = null;
+let michelCodecModule: any = null;
+let tzip12Mod: any = null;
+let tzip16Mod: any = null;
+let taquitoUtils: any = null;
 
 let tezos: any = null;
 let wallet: any = null;
@@ -29,10 +33,43 @@ async function loadBeaconWallet() {
   return { walletModule, beaconModule };
 }
 
+async function loadMichelCodec() {
+  if (!michelCodecModule) {
+    michelCodecModule = await import("@taquito/michel-codec");
+  }
+  return michelCodecModule;
+}
+
+async function loadTzip12() {
+  if (!tzip12Mod) {
+    tzip12Mod = await import("@taquito/tzip12");
+  }
+  return tzip12Mod;
+}
+
+async function loadTzip16() {
+  if (!tzip16Mod) {
+    tzip16Mod = await import("@taquito/tzip16");
+  }
+  return tzip16Mod;
+}
+
+async function loadUtils() {
+  if (!taquitoUtils) {
+    taquitoUtils = await import("@taquito/utils");
+  }
+  return taquitoUtils;
+}
+
 async function getTezos(network: string = "ghostnet") {
   if (!tezos) {
     const { TezosToolkit } = await loadTaquito();
     tezos = new TezosToolkit(RPC_URLS[network] || RPC_URLS.ghostnet);
+
+    const { Tzip12Module } = await loadTzip12();
+    const { Tzip16Module } = await loadTzip16();
+    tezos.addExtension(new Tzip12Module());
+    tezos.addExtension(new Tzip16Module());
   }
   return tezos;
 }
@@ -102,22 +139,73 @@ export interface OriginateParams {
   style: ContractStyle;
 }
 
-function buildFA2Storage(params: OriginateParams) {
-  const admin = params.admin;
-  return `(Pair (Pair "${admin}" (Pair ${params.minterListEnabled ? `{Elt "${admin}" True}` : "{}"} 0))
-          (Pair (Pair {} {})
-                (Pair {} (Pair "${params.metadataBaseUri || ""}" "${params.symbol}"))))`;
+async function buildFA2Storage(params: OriginateParams) {
+  const { MichelsonMap } = await loadTaquito();
+  const { char2Bytes } = await loadUtils();
+
+  const ledger = new MichelsonMap();
+  const operators = new MichelsonMap();
+  const tokenMetadata = new MichelsonMap();
+
+  const contractMetadata = new MichelsonMap();
+  const tzip16Meta = JSON.stringify({
+    name: params.name,
+    description: `${params.name} - FA2 NFT Collection deployed via MintCapsule`,
+    version: params.style.version,
+    interfaces: ["TZIP-012", "TZIP-016"],
+    authors: [params.admin],
+  });
+  contractMetadata.set("", char2Bytes("tezos-storage:content"));
+  contractMetadata.set("content", char2Bytes(tzip16Meta));
+
+  const styleId = params.style.id;
+  const hasMultiMinter = styleId === "fa2-multiminter" || styleId === "fa2-full";
+  const hasRoyalties = styleId === "fa2-royalties" || styleId === "fa2-full";
+  const hasPause = styleId === "fa2-full";
+
+  const storage: Record<string, any> = {
+    admin: params.admin,
+    next_token_id: 0,
+    ledger,
+    operators,
+    token_metadata: tokenMetadata,
+    metadata: contractMetadata,
+  };
+
+  if (hasMultiMinter) {
+    const minters = new MichelsonMap();
+    minters.set(params.admin, true);
+    storage.minters = minters;
+  }
+
+  if (hasRoyalties) {
+    const royalties = new MichelsonMap();
+    storage.royalties = royalties;
+  }
+
+  if (hasPause) {
+    storage.paused = false;
+  }
+
+  return storage;
 }
 
 export async function originateContract(params: OriginateParams): Promise<string> {
   const t = await getTezos();
+  const { getFA2Michelson, validateMichelson } = await import("./fa2-michelson");
+
+  const validation = validateMichelson(params.style.id);
+  if (!validation.valid) {
+    throw new Error(`Contract validation failed: ${validation.errors.join(", ")}`);
+  }
 
   try {
-    const storage = buildFA2Storage(params);
+    const code = getFA2Michelson(params.style.id);
+    const storage = await buildFA2Storage(params);
 
     const op = await t.wallet.originate({
-      code: FA2_MICHELSON_STUB,
-      init: storage,
+      code,
+      storage,
     }).send();
 
     const result = await op.confirmation(1);
@@ -149,33 +237,34 @@ export interface MintParams {
   owner: string;
 }
 
-function toHex(str: string): string {
-  return Array.from(new TextEncoder().encode(str))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 export async function mintToken(params: MintParams): Promise<string> {
   const t = await getTezos();
+  const { MichelsonMap } = await loadTaquito();
+  const { char2Bytes } = await loadUtils();
 
   try {
     const contract = await t.wallet.at(params.contractAddress);
 
-    const metadata = new Map<string, string>();
-    metadata.set("name", toHex(params.tokenName));
-    metadata.set("description", toHex(params.description || ""));
-    metadata.set("artifactUri", toHex(params.artifactUri));
+    const tokenInfo = new MichelsonMap();
+    tokenInfo.set("name", char2Bytes(params.tokenName));
+    tokenInfo.set("description", char2Bytes(params.description || ""));
+    tokenInfo.set("artifactUri", char2Bytes(params.artifactUri));
     if (params.displayUri) {
-      metadata.set("displayUri", toHex(params.displayUri));
+      tokenInfo.set("displayUri", char2Bytes(params.displayUri));
     }
     if (params.thumbnailUri) {
-      metadata.set("thumbnailUri", toHex(params.thumbnailUri));
+      tokenInfo.set("thumbnailUri", char2Bytes(params.thumbnailUri));
+    }
+    tokenInfo.set("decimals", char2Bytes("0"));
+
+    if (params.attributes && params.attributes !== "[]") {
+      tokenInfo.set("attributes", char2Bytes(params.attributes));
     }
 
     const op = await contract.methods.mint(
       params.owner,
       params.tokenId,
-      metadata,
+      tokenInfo,
       1
     ).send();
 
@@ -189,58 +278,39 @@ export async function mintToken(params: MintParams): Promise<string> {
   }
 }
 
-const FA2_MICHELSON_STUB = [
-  { prim: "parameter", args: [{ prim: "or", args: [
-    { prim: "pair", annots: ["%mint"], args: [
-      { prim: "address" }, { prim: "pair", args: [
-        { prim: "nat" }, { prim: "pair", args: [
-          { prim: "map", args: [{ prim: "string" }, { prim: "bytes" }] },
-          { prim: "nat" }
-        ]}
-      ]}
-    ]},
-    { prim: "or", args: [
-      { prim: "list", annots: ["%transfer"], args: [{ prim: "pair", args: [
-        { prim: "address" }, { prim: "list", args: [{ prim: "pair", args: [
-          { prim: "address" }, { prim: "pair", args: [{ prim: "nat" }, { prim: "nat" }] }
-        ]}] }
-      ]}] },
-      { prim: "list", annots: ["%update_operators"], args: [{ prim: "or", args: [
-        { prim: "pair", annots: ["%add_operator"], args: [
-          { prim: "address" }, { prim: "pair", args: [{ prim: "address" }, { prim: "nat" }] }
-        ]},
-        { prim: "pair", annots: ["%remove_operator"], args: [
-          { prim: "address" }, { prim: "pair", args: [{ prim: "address" }, { prim: "nat" }] }
-        ]}
-      ]}] }
-    ]}
-  ]}] },
-  { prim: "storage", args: [{ prim: "pair", args: [
-    { prim: "pair", args: [
-      { prim: "address", annots: ["%admin"] },
-      { prim: "pair", args: [
-        { prim: "big_map", annots: ["%minters"], args: [{ prim: "address" }, { prim: "bool" }] },
-        { prim: "nat", annots: ["%next_token_id"] }
-      ]}
-    ]},
-    { prim: "pair", args: [
-      { prim: "pair", args: [
-        { prim: "big_map", annots: ["%ledger"], args: [{ prim: "pair", args: [{ prim: "address" }, { prim: "nat" }] }, { prim: "nat" }] },
-        { prim: "big_map", annots: ["%operators"], args: [
-          { prim: "pair", args: [{ prim: "address" }, { prim: "pair", args: [{ prim: "address" }, { prim: "nat" }] }] },
-          { prim: "unit" }
-        ]}
-      ]},
-      { prim: "pair", args: [
-        { prim: "big_map", annots: ["%token_metadata"], args: [{ prim: "nat" }, { prim: "pair", args: [{ prim: "nat" }, { prim: "map", args: [{ prim: "string" }, { prim: "bytes" }] }] }] },
-        { prim: "pair", args: [
-          { prim: "string", annots: ["%metadata_base_uri"] },
-          { prim: "string", annots: ["%symbol"] }
-        ]}
-      ]}
-    ]}
-  ]}] },
-  { prim: "code", args: [[
-    { prim: "FAILWITH" }
-  ]] }
-];
+export async function getTokenMetadata(contractAddress: string, tokenId: number) {
+  const t = await getTezos();
+  const { tzip12 } = await loadTzip12();
+  const { compose } = await loadTaquito();
+  const { tzip16 } = await loadTzip16();
+
+  try {
+    const contract = await t.wallet.at(contractAddress, compose(tzip12, tzip16));
+    const metadata = await contract.tzip12().getTokenMetadata(tokenId);
+    return metadata;
+  } catch (err: any) {
+    console.error("Failed to fetch token metadata:", err.message);
+    return null;
+  }
+}
+
+export async function getContractMetadata(contractAddress: string) {
+  const t = await getTezos();
+  const { tzip16 } = await loadTzip16();
+
+  try {
+    const contract = await t.wallet.at(contractAddress, tzip16);
+    const metadata = await contract.tzip16().getMetadata();
+    return metadata;
+  } catch (err: any) {
+    console.error("Failed to fetch contract metadata:", err.message);
+    return null;
+  }
+}
+
+export async function parseMichelson(code: string) {
+  const { Parser, emitMicheline } = await loadMichelCodec();
+  const p = new Parser();
+  const parsed = p.parseScript(code);
+  return { parsed, micheline: parsed ? emitMicheline(parsed) : null };
+}
