@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useWallet } from "@/lib/wallet-context";
+import { useAuth } from "@/hooks/use-auth";
 import { shortenAddress } from "@/lib/tezos";
 import type { Contract } from "@shared/schema";
 
@@ -39,19 +39,15 @@ function ContractCard({ contract }: { contract: Contract }) {
         </Badge>
       </div>
 
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <Badge variant="secondary" className="text-[10px]">
           {contract.styleId.replace("fa2-", "FA2 ")}
         </Badge>
         {contract.royaltiesEnabled && (
-          <Badge variant="secondary" className="text-[10px]">
-            Royalties
-          </Badge>
+          <Badge variant="secondary" className="text-[10px]">Royalties</Badge>
         )}
         {contract.minterListEnabled && (
-          <Badge variant="secondary" className="text-[10px]">
-            Multi-Minter
-          </Badge>
+          <Badge variant="secondary" className="text-[10px]">Multi-Minter</Badge>
         )}
       </div>
 
@@ -63,10 +59,7 @@ function ContractCard({ contract }: { contract: Contract }) {
           <Button
             size="icon"
             variant="ghost"
-            onClick={(e) => {
-              e.stopPropagation();
-              window.open(`https://ghostnet.tzkt.io/${contract.kt1Address}`, "_blank");
-            }}
+            onClick={(e) => { e.stopPropagation(); window.open(`https://ghostnet.tzkt.io/${contract.kt1Address}`, "_blank"); }}
             data-testid={`button-view-explorer-${contract.id}`}
           >
             <ExternalLink className="w-3.5 h-3.5" />
@@ -74,10 +67,7 @@ function ContractCard({ contract }: { contract: Contract }) {
           <Button
             size="icon"
             variant="ghost"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/mint/${contract.id}`);
-            }}
+            onClick={(e) => { e.stopPropagation(); navigate(`/mint/${contract.id}`); }}
             data-testid={`button-mint-${contract.id}`}
           >
             <Paintbrush className="w-3.5 h-3.5" />
@@ -85,10 +75,7 @@ function ContractCard({ contract }: { contract: Contract }) {
           <Button
             size="icon"
             variant="ghost"
-            onClick={(e) => {
-              e.stopPropagation();
-              window.open(`/api/contracts/${contract.id}/config`, "_blank");
-            }}
+            onClick={(e) => { e.stopPropagation(); window.open(`/api/contracts/${contract.id}/config`, "_blank"); }}
             data-testid={`button-download-config-${contract.id}`}
           >
             <Download className="w-3.5 h-3.5" />
@@ -101,8 +88,6 @@ function ContractCard({ contract }: { contract: Contract }) {
 
 function EmptyState() {
   const [, navigate] = useLocation();
-  const { address } = useWallet();
-
   return (
     <div className="flex flex-col items-center justify-center py-20 px-4">
       <div className="flex items-center justify-center w-16 h-16 rounded-full bg-muted mb-4">
@@ -110,16 +95,12 @@ function EmptyState() {
       </div>
       <h2 className="text-lg font-semibold mb-1">No collections yet</h2>
       <p className="text-sm text-muted-foreground text-center max-w-sm mb-6">
-        {address
-          ? "Deploy your first NFT collection contract on Tezos. Choose a contract style and configure it with no code."
-          : "Connect your Tezos wallet to get started with deploying NFT collection contracts."}
+        Deploy your first NFT collection contract on Tezos. Choose a contract style and configure it with no code.
       </p>
-      {address && (
-        <Button onClick={() => navigate("/create")} data-testid="button-create-first-collection">
-          <Plus className="w-4 h-4 mr-2" />
-          Create New Collection
-        </Button>
-      )}
+      <Button onClick={() => navigate("/create")} data-testid="button-create-first-collection">
+        <Plus className="w-4 h-4 mr-2" />
+        Create New Collection
+      </Button>
     </div>
   );
 }
@@ -148,12 +129,12 @@ function LoadingSkeleton() {
 }
 
 export default function Dashboard() {
-  const { address } = useWallet();
+  const { isAuthenticated } = useAuth();
   const [, navigate] = useLocation();
 
   const { data: contracts, isLoading } = useQuery<Contract[]>({
-    queryKey: ["/api/contracts", address || ""],
-    enabled: !!address,
+    queryKey: ["/api/contracts/user/me"],
+    enabled: isAuthenticated,
   });
 
   return (
@@ -167,7 +148,7 @@ export default function Dashboard() {
             Manage your deployed NFT collection contracts
           </p>
         </div>
-        {address && contracts && contracts.length > 0 && (
+        {contracts && contracts.length > 0 && (
           <Button onClick={() => navigate("/create")} data-testid="button-create-collection">
             <Plus className="w-4 h-4 mr-2" />
             New Collection
@@ -175,9 +156,7 @@ export default function Dashboard() {
         )}
       </div>
 
-      {!address ? (
-        <EmptyState />
-      ) : isLoading ? (
+      {isLoading ? (
         <LoadingSkeleton />
       ) : !contracts || contracts.length === 0 ? (
         <EmptyState />
