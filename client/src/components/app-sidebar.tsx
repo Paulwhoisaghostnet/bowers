@@ -1,4 +1,4 @@
-import { LayoutDashboard, Plus, Hexagon } from "lucide-react";
+import { LayoutDashboard, Plus, Bird } from "lucide-react";
 import { useLocation } from "wouter";
 import {
   Sidebar,
@@ -34,10 +34,10 @@ export function AppSidebar() {
           data-testid="link-home"
         >
           <div className="flex items-center justify-center w-9 h-9 rounded-md bg-primary">
-            <Hexagon className="w-5 h-5 text-primary-foreground" />
+            <Bird className="w-5 h-5 text-primary-foreground" />
           </div>
           <div>
-            <h1 className="text-sm font-semibold tracking-tight">MintCapsule</h1>
+            <h1 className="text-sm font-semibold tracking-tight">Bowers</h1>
             <p className="text-[10px] text-muted-foreground">Tezos NFT Studio</p>
           </div>
         </div>

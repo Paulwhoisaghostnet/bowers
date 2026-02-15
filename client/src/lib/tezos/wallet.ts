@@ -21,7 +21,7 @@ export async function getWallet() {
     const { BeaconWallet } = (await loadBeaconWallet()).walletModule;
     const { NetworkType } = (await loadBeaconWallet()).beaconModule;
     wallet = new BeaconWallet({
-      name: "MintCapsule",
+      name: "Bowers",
       preferredNetwork: NetworkType.GHOSTNET,
     });
   }

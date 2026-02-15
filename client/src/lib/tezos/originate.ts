@@ -24,7 +24,7 @@ export async function buildFA2Storage(params: OriginateParams) {
   const contractMetadata = new MichelsonMap();
   const tzip16Meta = JSON.stringify({
     name: params.name,
-    description: `${params.name} - FA2 NFT Collection deployed via MintCapsule`,
+    description: `${params.name} - FA2 NFT Collection deployed via Bowers`,
     version: params.style.version,
     interfaces: ["TZIP-012", "TZIP-016"],
     authors: [params.admin],

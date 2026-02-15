@@ -1,7 +1,7 @@
-# MintCapsule - Tezos NFT Studio
+# Bowers - Tezos NFT Studio
 
 ## Overview
-MintCapsule is a no-code Tezos NFT collection contract deployment dApp. Artists can create, configure, and deploy FA2-compliant NFT contracts on the Tezos blockchain without writing any code.
+Bowers is a no-code Tezos NFT collection contract deployment dApp. Artists can create, configure, and deploy FA2-compliant NFT contracts on the Tezos blockchain without writing any code.
 
 ## Architecture
 - **Frontend**: React + Vite + TailwindCSS + shadcn/ui components
