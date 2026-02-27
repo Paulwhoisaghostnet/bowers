@@ -1,17 +1,29 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { ChevronRight, ChevronLeft, Hexagon } from "lucide-react";
-import { originateContract } from "@/lib/tezos";
+import { originateContract, estimateOrigination, type OriginationEstimate } from "@/lib/tezos";
+import { uploadMetadataToIPFS } from "@/lib/ipfs";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/lib/wallet-context";
+import { useNetwork } from "@/lib/network-context";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { CONTRACT_STYLES } from "@shared/schema";
+import {
+  CONTRACT_STYLES,
+  resolveStyleFromModules,
+  computeModuleAggregates,
+  validateModuleSelection,
+} from "@shared/schema";
 import { motion, AnimatePresence } from "framer-motion";
-import { type WizardState, defaultState, STEPS, isValidTezosAddress, isBowersStyle } from "./types";
+import {
+  type WizardState,
+  defaultState,
+  getSteps,
+} from "./types";
 import { StepIndicator } from "./step-indicator";
 import { StepSelectStyle } from "./step-select-style";
+import { StepModules } from "./step-modules";
 import { StepConfigure } from "./step-configure";
 import { StepReview } from "./step-review";
 import { StepDeploy } from "./step-deploy";
@@ -20,22 +32,76 @@ export default function CreateCollection() {
   const [step, setStep] = useState(0);
   const [state, setState] = useState<WizardState>(defaultState);
   const [deployError, setDeployError] = useState<string | null>(null);
-  const { address, connect } = useWallet();
+  const { address, connect, isConnecting } = useWallet();
   const { toast } = useToast();
+  const { network } = useNetwork();
   const [, navigate] = useLocation();
+
+  const [estimate, setEstimate] = useState<OriginationEstimate | null>(null);
+  const [estimateError, setEstimateError] = useState<string | null>(null);
+  const [isEstimating, setIsEstimating] = useState(false);
+
+  const isCustom = state.styleId === "bowers-custom";
+  const steps = useMemo(() => getSteps(state.styleId), [state.styleId]);
+
+  const currentStepName = steps[step] || "";
 
   const onChange = useCallback((updates: Partial<WizardState>) => {
     setState((prev) => ({ ...prev, ...updates }));
   }, []);
 
+  /**
+   * For custom contracts, resolve the actual deployable style from modules.
+   * For presets, use the selected style directly.
+   */
+  const getDeployStyle = useCallback(() => {
+    if (isCustom) {
+      const resolvedId = resolveStyleFromModules(state.selectedModules);
+      return CONTRACT_STYLES.find((s) => s.id === resolvedId)!;
+    }
+    return CONTRACT_STYLES.find((s) => s.id === state.styleId)!;
+  }, [isCustom, state.styleId, state.selectedModules]);
+
+  useEffect(() => {
+    const currentStep = steps[step];
+    if (currentStep !== "Deploy" || !address) return;
+
+    let cancelled = false;
+    setEstimate(null);
+    setEstimateError(null);
+    setIsEstimating(true);
+
+    const style = getDeployStyle();
+    estimateOrigination({
+      name: state.name,
+      symbol: state.symbol,
+      admin: address,
+      royaltiesEnabled: true,
+      royaltyPercent: 0,
+      minterListEnabled: false,
+      metadataBaseUri: "ipfs://placeholder",
+      style,
+    })
+      .then((est) => {
+        if (!cancelled) setEstimate(est);
+      })
+      .catch((err) => {
+        if (!cancelled) setEstimateError(err?.message || "Unknown estimation error");
+      })
+      .finally(() => {
+        if (!cancelled) setIsEstimating(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [step, steps, address, state.name, state.symbol, getDeployStyle]);
+
   const canProceed = () => {
-    if (step === 0) return !!state.styleId;
-    if (step === 1) {
-      if (!state.name || !state.symbol) return false;
-      if (isBowersStyle(state.styleId)) {
-        return isValidTezosAddress(state.royaltyRecipient) && state.royaltyBps >= 0 && state.royaltyBps <= 10000 && state.minOfferPerUnitMutez > 0;
-      }
-      return true;
+    if (currentStepName === "Contract Style") return !!state.styleId;
+    if (currentStepName === "Modules") {
+      return validateModuleSelection(state.selectedModules).length === 0;
+    }
+    if (currentStepName === "Configuration") {
+      return !!(state.name && state.symbol);
     }
     return true;
   };
@@ -44,57 +110,55 @@ export default function CreateCollection() {
     mutationFn: async () => {
       if (!address) throw new Error("Wallet not connected");
 
-      const style = CONTRACT_STYLES.find((s) => s.id === state.styleId)!;
+      const style = getDeployStyle();
 
-      const isBowers = isBowersStyle(state.styleId);
-      let kt1: string;
-      try {
-        kt1 = await originateContract({
-          name: state.name,
-          symbol: state.symbol,
-          admin: address,
-          royaltiesEnabled: isBowers ? true : state.royaltiesEnabled,
-          royaltyPercent: isBowers ? Math.round(state.royaltyBps / 100) : (state.royaltiesEnabled ? state.royaltyPercent : 0),
-          minterListEnabled: state.minterListEnabled,
-          metadataBaseUri: state.metadataBaseUri,
-          style,
-          ...(isBowers && {
-            royaltyBps: state.royaltyBps,
-            royaltyRecipient: state.royaltyRecipient,
-            minOfferPerUnitMutez: state.minOfferPerUnitMutez,
-          }),
-        });
-      } catch {
-        kt1 = `KT1${Array.from({ length: 33 }, () =>
-          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[
-            Math.floor(Math.random() * 62)
-          ]
-        ).join("")}`;
-      }
+      const tzip16Metadata: Record<string, unknown> = {
+        name: state.name,
+        description: state.collectionDescription || state.name,
+        version: style.version,
+        interfaces: ["TZIP-012", "TZIP-016", "TZIP-021"],
+        authors: [address],
+      };
+      if (state.coverImageUri) tzip16Metadata.imageUri = state.coverImageUri;
+      if (state.homepage) tzip16Metadata.homepage = state.homepage;
+
+      const pinResult = await uploadMetadataToIPFS(tzip16Metadata);
+      const metadataBaseUri = pinResult.uri;
+
+      const kt1 = await originateContract({
+        name: state.name,
+        symbol: state.symbol,
+        admin: address,
+        royaltiesEnabled: true,
+        royaltyPercent: 0,
+        minterListEnabled: false,
+        metadataBaseUri,
+        style,
+      });
+
+      const { features, entrypoints: eps } = isCustom
+        ? computeModuleAggregates(state.selectedModules)
+        : { features: style.features, entrypoints: Object.values(style.entrypoints) };
 
       const res = await apiRequest("POST", "/api/contracts", {
         kt1Address: kt1,
-        styleId: state.styleId,
+        styleId: isCustom ? resolveStyleFromModules(state.selectedModules) : state.styleId,
         styleVersion: style.version,
         ownerAddress: address,
         name: state.name,
         symbol: state.symbol,
-        adminModel: isBowers ? "single" : state.adminModel,
-        royaltiesEnabled: isBowers ? true : state.royaltiesEnabled,
-        royaltyPercent: isBowers ? Math.round(state.royaltyBps / 100) : (state.royaltiesEnabled ? state.royaltyPercent : 0),
-        minterListEnabled: state.minterListEnabled,
-        metadataBaseUri: state.metadataBaseUri,
-        network: "ghostnet",
+        adminModel: "single",
+        royaltiesEnabled: true,
+        royaltyPercent: 0,
+        minterListEnabled: false,
+        metadataBaseUri,
+        network,
         status: "deployed",
         tokenCount: 0,
         options: {
-          features: style.features,
+          features,
           entrypoints: style.entrypoints,
-          ...(isBowers && {
-            royaltyBps: state.royaltyBps,
-            royaltyRecipient: state.royaltyRecipient,
-            minOfferPerUnitMutez: state.minOfferPerUnitMutez,
-          }),
+          selectedModules: isCustom ? state.selectedModules : undefined,
         },
       });
       return await res.json();
@@ -103,7 +167,8 @@ export default function CreateCollection() {
       queryClient.invalidateQueries({ queryKey: ["/api/contracts"] });
       toast({
         title: "Contract Deployed",
-        description: "Your NFT collection contract has been deployed successfully!",
+        description:
+          "Your NFT collection contract has been deployed successfully!",
       });
       navigate("/");
     },
@@ -117,6 +182,12 @@ export default function CreateCollection() {
     deployMutation.mutate();
   };
 
+  const lastStepIndex = steps.length - 1;
+  const deployStepName = "Deploy";
+  const reviewStepName = "Review";
+  const isDeployStep = currentStepName === deployStepName;
+  const isReviewStep = currentStepName === reviewStepName;
+
   if (!address) {
     return (
       <div className="flex flex-col items-center justify-center py-20 px-4">
@@ -127,8 +198,12 @@ export default function CreateCollection() {
         <p className="text-sm text-muted-foreground text-center max-w-sm mb-6">
           Connect your Tezos wallet to create a new collection contract.
         </p>
-        <Button onClick={connect} data-testid="button-connect-to-create">
-          Connect Wallet
+        <Button
+          onClick={() => connect()}
+          disabled={isConnecting}
+          data-testid="button-connect-to-create"
+        >
+          {isConnecting ? "Connecting..." : "Connect Wallet"}
         </Button>
       </div>
     );
@@ -136,31 +211,43 @@ export default function CreateCollection() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <StepIndicator currentStep={step} />
+      <StepIndicator currentStep={step} steps={steps} />
 
       <AnimatePresence mode="wait">
         <motion.div
-          key={step}
+          key={`${state.styleId}-${step}`}
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -20 }}
           transition={{ duration: 0.2 }}
         >
-          {step === 0 && <StepSelectStyle state={state} onChange={onChange} />}
-          {step === 1 && <StepConfigure state={state} onChange={onChange} />}
-          {step === 2 && <StepReview state={state} />}
-          {step === 3 && (
+          {currentStepName === "Contract Style" && (
+            <StepSelectStyle state={state} onChange={onChange} />
+          )}
+          {currentStepName === "Modules" && (
+            <StepModules state={state} onChange={onChange} />
+          )}
+          {currentStepName === "Configuration" && (
+            <StepConfigure state={state} onChange={onChange} />
+          )}
+          {currentStepName === "Review" && (
+            <StepReview state={state} />
+          )}
+          {currentStepName === "Deploy" && (
             <StepDeploy
               state={state}
               onDeploy={handleDeploy}
               isDeploying={deployMutation.isPending}
               error={deployError}
+              estimate={estimate}
+              estimateError={estimateError}
+              isEstimating={isEstimating}
             />
           )}
         </motion.div>
       </AnimatePresence>
 
-      {step < 3 && (
+      {!isDeployStep && (
         <div className="flex items-center justify-between mt-8 pt-4 border-t">
           <Button
             variant="ghost"
@@ -172,11 +259,11 @@ export default function CreateCollection() {
             Back
           </Button>
           <Button
-            onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}
+            onClick={() => setStep((s) => Math.min(lastStepIndex, s + 1))}
             disabled={!canProceed()}
             data-testid="button-wizard-next"
           >
-            {step === 2 ? "Proceed to Deploy" : "Next"}
+            {isReviewStep ? "Proceed to Deploy" : "Next"}
             <ChevronRight className="w-4 h-4 ml-1" />
           </Button>
         </div>

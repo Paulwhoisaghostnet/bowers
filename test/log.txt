@@ -1,0 +1,13 @@
+Creating contract KT1TezoooozzSmartPyzzSTATiCzzzwwBFA1
+ -> (Pair None 0)
+file test/step_001_cont_0_storage.tz
+file test/step_001_cont_0_storage.json
+file test/step_001_cont_0_storage.py
+file test/step_001_cont_0_types.py
+file test/step_001_cont_0_contract.tz contract Test
+file test/step_001_cont_0_contract.json contract Test
+file test/step_002_cont_0_params.py
+file test/step_002_cont_0_params.tz
+file test/step_002_cont_0_params.json
+Executing check(())...
+ -> (Pair None 0)

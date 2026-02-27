@@ -3,646 +3,354 @@ import smartpy as sp
 @sp.module
 def main():
 
-    ####################################################################
-    # Types
-    ####################################################################
+    # ---- Types ----
 
-    OfferType = sp.TRecord(
-        token_id=sp.TNat,
-        buyer=sp.TAddress,
-        unit_price=sp.TMutez,          # fixed per-unit price (enforced at creation)
-        remaining_qty=sp.TNat,         # remaining quantity to fill
-        remaining_amount=sp.TMutez,    # remaining funds to be paid out/refunded
-        expiry=sp.TTimestamp,
-        active=sp.TBool,
-        required_rejections=sp.TNat,   # snapshot of owner_count at creation
-        rejected_count=sp.TNat
-    ).layout(
-        ("token_id",
-         ("buyer",
-          ("unit_price",
-           ("remaining_qty",
-            ("remaining_amount",
-             ("expiry",
-              ("active", ("required_rejections", "rejected_count")))))))))
+    OfferType: type = sp.record(
+        token_id=sp.nat, buyer=sp.address, unit_price=sp.mutez,
+        remaining_qty=sp.nat, expiry=sp.timestamp)
+
+    ListingType: type = sp.record(price=sp.mutez, max_qty=sp.nat, min_bps=sp.nat)
+
+    BalanceOfRequestType: type = sp.record(owner=sp.address, token_id=sp.nat)
+    BalanceOfResponseType: type = sp.record(request=BalanceOfRequestType, balance=sp.nat)
+    LedgerKeyType: type = sp.record(owner=sp.address, token_id=sp.nat)
+    OperatorKeyType: type = sp.record(owner=sp.address, operator=sp.address, token_id=sp.nat)
+    BlacklistKeyType: type = sp.record(owner=sp.address, token_id=sp.nat, blocked=sp.address)
+    OperatorParamType: type = sp.variant(add_operator=OperatorKeyType, remove_operator=OperatorKeyType)
+    TransferTxType: type = sp.record(to_=sp.address, token_id=sp.nat, amount=sp.nat)
+    TransferBatchItemType: type = sp.record(from_=sp.address, txs=sp.list[TransferTxType])
+
+    TokenMarketType: type = sp.record(
+        royalty_recipient=sp.address,
+        royalty_bps=sp.nat,
+        min_offer_per_unit_mutez=sp.mutez,
     )
 
-    BalanceOfRequestType = sp.TRecord(owner=sp.TAddress, token_id=sp.TNat).layout(("owner", "token_id"))
-    BalanceOfResponseType = sp.TRecord(request=BalanceOfRequestType, balance=sp.TNat).layout(("request", "balance"))
-
-    OperatorParamType = sp.TVariant(
-        add_operator=sp.TRecord(owner=sp.TAddress, operator=sp.TAddress, token_id=sp.TNat).layout(("owner", ("operator", "token_id"))),
-        remove_operator=sp.TRecord(owner=sp.TAddress, operator=sp.TAddress, token_id=sp.TNat).layout(("owner", ("operator", "token_id")))
-    )
-
-    TransferTxType = sp.TRecord(to_=sp.TAddress, token_id=sp.TNat, amount=sp.TNat).layout(("to_", ("token_id", "amount")))
-    TransferBatchItemType = sp.TRecord(from_=sp.TAddress, txs=sp.TList(TransferTxType)).layout(("from_", "txs"))
-
-    ####################################################################
-    # Contract
-    ####################################################################
+    # ---- Contract ----
 
     class BowersFA2(sp.Contract):
 
-        def __init__(self, admin, metadata, royalty_recipient, royalty_bps, min_offer_per_unit_mutez):
-            sp.verify(royalty_bps <= 10_000, "ROYALTY_BPS_TOO_HIGH")
+        def __init__(self, admin, metadata):
+            self.data.admin = admin
+            self.data.ledger = sp.cast(sp.big_map(), sp.big_map[LedgerKeyType, sp.nat])
+            self.data.token_metadata = sp.cast(sp.big_map(), sp.big_map[sp.nat, sp.record(token_id=sp.nat, token_info=sp.map[sp.string, sp.bytes])])
+            self.data.operators = sp.cast(sp.big_map(), sp.big_map[OperatorKeyType, sp.unit])
+            self.data.next_token_id = sp.nat(0)
+            self.data.listings = sp.cast(sp.big_map(), sp.big_map[LedgerKeyType, ListingType])
+            self.data.offers = sp.cast(sp.big_map(), sp.big_map[sp.nat, OfferType])
+            self.data.next_offer_id = sp.nat(0)
+            self.data.claimable = sp.cast(sp.big_map(), sp.big_map[sp.address, sp.mutez])
+            self.data.blacklist = sp.cast(sp.big_map(), sp.big_map[BlacklistKeyType, sp.unit])
+            self.data.contract_blocklist = sp.cast(sp.big_map(), sp.big_map[sp.address, sp.unit])
+            self.data.token_market = sp.cast(sp.big_map(), sp.big_map[sp.nat, TokenMarketType])
+            self.data.metadata = metadata
 
-            self.init(
-                # FA2 core
-                admin=admin,
-
-                ledger=sp.big_map(
-                    tkey=sp.TRecord(owner=sp.TAddress, token_id=sp.TNat).layout(("owner", "token_id")),
-                    tvalue=sp.TNat
-                ),
-
-                token_supply=sp.big_map(tkey=sp.TNat, tvalue=sp.TNat),
-
-                token_metadata=sp.big_map(
-                    tkey=sp.TNat,
-                    tvalue=sp.TRecord(token_id=sp.TNat, token_info=sp.TMap(sp.TString, sp.TBytes)).layout(("token_id", "token_info"))
-                ),
-
-                operators=sp.big_map(
-                    tkey=sp.TRecord(owner=sp.TAddress, operator=sp.TAddress, token_id=sp.TNat).layout(("owner", ("operator", "token_id"))),
-                    tvalue=sp.TUnit
-                ),
-
-                next_token_id=sp.nat(0),
-
-                # Owner registry
-                token_owners=sp.big_map(
-                    tkey=sp.TRecord(token_id=sp.TNat, owner=sp.TAddress).layout(("token_id", "owner")),
-                    tvalue=sp.TUnit
-                ),
-                owner_count=sp.big_map(tkey=sp.TNat, tvalue=sp.TNat),
-
-                # Listings / controls (owner-scoped)
-                prices=sp.big_map(
-                    tkey=sp.TRecord(owner=sp.TAddress, token_id=sp.TNat).layout(("owner", "token_id")),
-                    tvalue=sp.TMutez
-                ),
-                max_buy_qty=sp.big_map(
-                    tkey=sp.TRecord(owner=sp.TAddress, token_id=sp.TNat).layout(("owner", "token_id")),
-                    tvalue=sp.TNat
-                ),
-                min_offer_bps_of_list=sp.big_map(
-                    tkey=sp.TRecord(owner=sp.TAddress, token_id=sp.TNat).layout(("owner", "token_id")),
-                    tvalue=sp.TNat
-                ),
-
-                # Offers (token-wide, PARTIAL FILL)
-                offers=sp.big_map(tkey=sp.TNat, tvalue=OfferType),
-                next_offer_id=sp.nat(0),
-
-                offer_rejections=sp.big_map(
-                    tkey=sp.TRecord(offer_id=sp.TNat, owner=sp.TAddress).layout(("offer_id", "owner")),
-                    tvalue=sp.TUnit
-                ),
-
-                # Pull payments
-                claimable=sp.big_map(tkey=sp.TAddress, tvalue=sp.TMutez),
-
-                # Owner-scoped blacklist
-                blacklist=sp.big_map(
-                    tkey=sp.TRecord(owner=sp.TAddress, token_id=sp.TNat, blocked=sp.TAddress).layout(("owner", ("token_id", "blocked"))),
-                    tvalue=sp.TUnit
-                ),
-
-                # Config
-                royalty_recipient=royalty_recipient,
-                royalty_bps=royalty_bps,
-                min_offer_per_unit_mutez=min_offer_per_unit_mutez,
-                metadata=metadata
-            )
-
-        ################################################################
-        # Helpers
-        ################################################################
-
-        def bal(self, owner, token_id):
-            return self.data.ledger.get(sp.record(owner=owner, token_id=token_id), 0)
-
-        def credit(self, addr, amount):
-            self.data.claimable[addr] = self.data.claimable.get(addr, sp.mutez(0)) + amount
-
-        def is_blacklisted(self, owner, token_id, actor):
-            return self.data.blacklist.contains(sp.record(owner=owner, token_id=token_id, blocked=actor))
-
-        def mul_mutez_nat(self, m, n):
-            return sp.split_tokens(m, n, 1)  # m * n
-
-        def owner_key(self, token_id, owner):
-            return sp.record(token_id=token_id, owner=owner)
-
-        def price_key(self, owner, token_id):
-            return sp.record(owner=owner, token_id=token_id)
-
-        def get_owner_count_internal(self, token_id):
-            return self.data.owner_count.get(token_id, 0)
-
-        def set_owner_present(self, token_id, owner, present):
-            k = self.owner_key(token_id, owner)
-            count = self.get_owner_count_internal(token_id)
-
-            sp.if present:
-                sp.if ~self.data.token_owners.contains(k):
-                    self.data.token_owners[k] = sp.unit
-                    self.data.owner_count[token_id] = count + 1
-            sp.else:
-                sp.if self.data.token_owners.contains(k):
-                    del self.data.token_owners[k]
-                    sp.verify(count > 0, "OWNER_COUNT_UNDERFLOW")
-                    self.data.owner_count[token_id] = count - 1
-
-        def set_bal(self, owner, token_id, new_bal):
-            key = sp.record(owner=owner, token_id=token_id)
-            old_bal = self.bal(owner, token_id)
-
-            sp.if new_bal == 0:
-                sp.if self.data.ledger.contains(key):
-                    del self.data.ledger[key]
-            sp.else:
-                self.data.ledger[key] = new_bal
-
-            sp.if (old_bal == 0) & (new_bal > 0):
-                self.set_owner_present(token_id, owner, True)
-            sp.if (old_bal > 0) & (new_bal == 0):
-                self.set_owner_present(token_id, owner, False)
-
-                # clear listing when owner exits holdings
-                pk = self.price_key(owner, token_id)
-                sp.if self.data.prices.contains(pk):
-                    del self.data.prices[pk]
-
-        def require_owner(self, token_id):
-            sp.verify(self.bal(sp.sender, token_id) > 0, "NOT_OWNER")
-
-        def require_operator_or_owner(self, owner, token_id):
-            sp.if owner != sp.sender:
-                key = sp.record(owner=owner, operator=sp.sender, token_id=token_id)
-                sp.verify(self.data.operators.contains(key), "NOT_OPERATOR")
-
-        def get_max_buy_qty(self, owner, token_id):
-            return self.data.max_buy_qty.get(self.price_key(owner, token_id), 0)
-
-        def get_min_offer_bps(self, owner, token_id):
-            return self.data.min_offer_bps_of_list.get(self.price_key(owner, token_id), 0)
-
-        def owner_floor_total(self, owner, token_id, qty):
-            """
-            returns (enabled, floor_total_mutez)
-            enabled iff owner has listing AND bps>0
-            """
-            pk = self.price_key(owner, token_id)
-            bps = self.get_min_offer_bps(owner, token_id)
-
-            sp.if (bps > 0) & self.data.prices.contains(pk):
-                list_total = self.mul_mutez_nat(self.data.prices[pk], qty)
-                floor_total = sp.split_tokens(list_total, bps, 10_000)
-                return sp.pair(True, floor_total)
-            sp.else:
-                return sp.pair(False, sp.mutez(0))
-
-        ################################################################
-        # Events
-        ################################################################
-
-        def emit(self, tag, payload):
-            sp.emit(payload, tag=tag)
-
-        ################################################################
-        # FA2 entrypoints
-        ################################################################
+        # ---- FA2 standard (TZIP-12) ----
 
         @sp.entrypoint
         def balance_of(self, params):
-            sp.set_type(params, sp.TRecord(
-                requests=sp.TList(BalanceOfRequestType),
-                callback=sp.TContract(sp.TList(BalanceOfResponseType))
-            ).layout(("requests", "callback")))
-
-            responses = sp.local("responses", sp.list(t=BalanceOfResponseType))
-            sp.for req in params.requests:
-                responses.value.push(sp.record(request=req, balance=self.bal(req.owner, req.token_id)))
-            sp.transfer(responses.value, sp.mutez(0), params.callback)
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            sp.cast(params, sp.record(requests=sp.list[BalanceOfRequestType], callback=sp.contract[sp.list[BalanceOfResponseType]]))
+            balances = []
+            for req in params.requests:
+                bal = self.data.ledger.get(sp.record(owner=req.owner, token_id=req.token_id), default=sp.nat(0))
+                balances.push(sp.record(request=sp.record(owner=req.owner, token_id=req.token_id), balance=bal))
+            sp.transfer(reversed(balances), sp.mutez(0), params.callback)
 
         @sp.entrypoint
-        def update_operators(self, params):
-            sp.set_type(params, sp.TList(OperatorParamType))
-
-            sp.for update in params:
-                sp.if update.is_variant("add_operator"):
-                    op = update.add_operator
-                    sp.verify(op.owner == sp.sender, "NOT_OWNER")
-                    self.data.operators[sp.record(owner=op.owner, operator=op.operator, token_id=op.token_id)] = sp.unit
-                    self.emit("fa2_operator_added", sp.record(owner=op.owner, operator=op.operator, token_id=op.token_id))
-                sp.else:
-                    op = update.remove_operator
-                    sp.verify(op.owner == sp.sender, "NOT_OWNER")
-                    k = sp.record(owner=op.owner, operator=op.operator, token_id=op.token_id)
-                    sp.verify(self.data.operators.contains(k), "NO_SUCH_OPERATOR")
-                    del self.data.operators[k]
-                    self.emit("fa2_operator_removed", sp.record(owner=op.owner, operator=op.operator, token_id=op.token_id))
+        def update_operators(self, actions):
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            sp.cast(actions, sp.list[OperatorParamType])
+            for action in actions:
+                match action:
+                    case add_operator(op):
+                        assert op.owner == sp.sender, "NOT_OWNER"
+                        self.data.operators[op] = ()
+                    case remove_operator(op):
+                        assert op.owner == sp.sender, "NOT_OWNER"
+                        assert op in self.data.operators, "NO_OP"
+                        del self.data.operators[op]
 
         @sp.entrypoint
         def transfer(self, batch):
-            sp.set_type(batch, sp.TList(TransferBatchItemType))
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            sp.cast(batch, sp.list[TransferBatchItemType])
+            for item in batch:
+                from_ = item.from_
+                for tx in item.txs:
+                    assert not (from_ in self.data.contract_blocklist), "BLOCKED"
+                    assert not (tx.to_ in self.data.contract_blocklist), "BLOCKED"
+                    if from_ != sp.sender:
+                        assert sp.record(owner=from_, operator=sp.sender, token_id=tx.token_id) in self.data.operators, "NOT_OPERATOR"
+                    assert tx.amount > 0, "BAD_AMOUNT"
+                    fk = sp.record(owner=from_, token_id=tx.token_id)
+                    fb = self.data.ledger.get(fk, default=sp.nat(0))
+                    assert fb >= tx.amount, "LOW_BAL"
+                    nfb = sp.as_nat(fb - tx.amount)
+                    if nfb == 0:
+                        if fk in self.data.ledger:
+                            del self.data.ledger[fk]
+                        if fk in self.data.listings:
+                            del self.data.listings[fk]
+                    else:
+                        self.data.ledger[fk] = nfb
+                    tk = sp.record(owner=tx.to_, token_id=tx.token_id)
+                    tb = self.data.ledger.get(tk, default=sp.nat(0))
+                    self.data.ledger[tk] = tb + tx.amount
+                    sp.emit(sp.record(f=from_, t=tx.to_, i=tx.token_id, a=tx.amount), tag="xfer")
 
-            sp.for tx in batch:
-                owner = tx.from_
-                sp.for t in tx.txs:
-                    self.require_operator_or_owner(owner, t.token_id)
-                    sp.verify(t.amount > 0, "BAD_AMOUNT")
-                    sp.verify(self.bal(owner, t.token_id) >= t.amount, "INSUFFICIENT_BALANCE")
-
-                    self.set_bal(owner, t.token_id, self.bal(owner, t.token_id) - t.amount)
-                    self.set_bal(t.to_, t.token_id, self.bal(t.to_, t.token_id) + t.amount)
-
-                    self.emit("fa2_transfer", sp.record(from_=owner, to_=t.to_, token_id=t.token_id, amount=t.amount))
-
-        ################################################################
-        # Minting
-        ################################################################
+        # ---- Minting ----
 
         @sp.entrypoint
         def mint(self, params):
-            sp.set_type(params, sp.TRecord(
-                to_=sp.TAddress,
-                supply=sp.TNat,
-                token_info=sp.TMap(sp.TString, sp.TBytes)
-            ).layout(("to_", ("supply", "token_info"))))
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            sp.cast(
+                params,
+                sp.record(
+                    metadata_uri=sp.bytes,
+                    supply=sp.nat,
+                    royalty_recipient=sp.address,
+                    royalty_bps=sp.nat,
+                    min_offer_per_unit_mutez=sp.mutez,
+                ),
+            )
+            assert sp.sender == self.data.admin, "NOT_ADMIN"
+            assert params.supply > 0, "ZERO_SUPPLY"
+            assert params.royalty_bps <= 10_000, "BPS_TOO_HIGH"
 
-            sp.verify(sp.sender == self.data.admin, "NOT_ADMIN")
-            sp.verify(params.supply > 0, "ZERO_SUPPLY")
-
-            token_id = self.data.next_token_id
+            tid = self.data.next_token_id
             self.data.next_token_id += 1
 
-            self.data.token_supply[token_id] = params.supply
-            self.data.token_metadata[token_id] = sp.record(token_id=token_id, token_info=params.token_info)
+            token_info = {"": params.metadata_uri, "decimals": sp.bytes("0x30")}
+            self.data.token_metadata[tid] = sp.record(token_id=tid, token_info=token_info)
 
-            self.set_bal(params.to_, token_id, self.bal(params.to_, token_id) + params.supply)
+            self.data.token_market[tid] = sp.record(
+                royalty_recipient=params.royalty_recipient,
+                royalty_bps=params.royalty_bps,
+                min_offer_per_unit_mutez=params.min_offer_per_unit_mutez,
+            )
 
-            self.emit("minted", sp.record(token_id=token_id, to_=params.to_, supply=params.supply))
+            lk = sp.record(owner=self.data.admin, token_id=tid)
+            cb = self.data.ledger.get(lk, default=sp.nat(0))
+            self.data.ledger[lk] = cb + params.supply
+            sp.emit(sp.record(i=tid, t=self.data.admin, s=params.supply), tag="mint")
 
-        ################################################################
-        # Listings / Controls (owner-scoped)
-        ################################################################
-
-        @sp.entrypoint
-        def set_price(self, params):
-            sp.set_type(params, sp.TRecord(token_id=sp.TNat, price_per_unit=sp.TMutez).layout(("token_id", "price_per_unit")))
-
-            self.require_owner(params.token_id)
-            sp.verify(params.price_per_unit > sp.mutez(0), "BAD_PRICE")
-            self.data.prices[self.price_key(sp.sender, params.token_id)] = params.price_per_unit
-            self.emit("price_set", sp.record(owner=sp.sender, token_id=params.token_id, price_per_unit=params.price_per_unit))
+        # ---- Listings (set price=0 to clear) ----
 
         @sp.entrypoint
-        def clear_price(self, token_id):
-            sp.set_type(token_id, sp.TNat)
+        def set_listing(self, params):
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            sp.cast(params, sp.record(token_id=sp.nat, price=sp.mutez, max_qty=sp.nat, min_bps=sp.nat))
+            pk = sp.record(owner=sp.sender, token_id=params.token_id)
+            assert self.data.ledger.get(pk, default=sp.nat(0)) > 0, "NOT_OWNER"
+            if params.price == sp.mutez(0):
+                if pk in self.data.listings:
+                    del self.data.listings[pk]
+            else:
+                assert params.min_bps <= 10_000, "BPS_TOO_HIGH"
+                self.data.listings[pk] = sp.record(price=params.price, max_qty=params.max_qty, min_bps=params.min_bps)
 
-            self.require_owner(token_id)
-            pk = self.price_key(sp.sender, token_id)
-            sp.if self.data.prices.contains(pk):
-                del self.data.prices[pk]
-                self.emit("price_cleared", sp.record(owner=sp.sender, token_id=token_id))
-
-        @sp.entrypoint
-        def set_max_buy_qty(self, params):
-            sp.set_type(params, sp.TRecord(token_id=sp.TNat, max_qty=sp.TNat).layout(("token_id", "max_qty")))
-
-            self.require_owner(params.token_id)
-            self.data.max_buy_qty[self.price_key(sp.sender, params.token_id)] = params.max_qty
-            self.emit("max_buy_qty_set", sp.record(owner=sp.sender, token_id=params.token_id, max_qty=params.max_qty))
-
-        @sp.entrypoint
-        def set_min_offer_percent_of_list(self, params):
-            sp.set_type(params, sp.TRecord(token_id=sp.TNat, min_bps=sp.TNat).layout(("token_id", "min_bps")))
-
-            self.require_owner(params.token_id)
-            sp.verify(params.min_bps <= 10_000, "BPS_TOO_HIGH")
-            self.data.min_offer_bps_of_list[self.price_key(sp.sender, params.token_id)] = params.min_bps
-            self.emit("min_offer_bps_set", sp.record(owner=sp.sender, token_id=params.token_id, min_bps=params.min_bps))
-
-        ################################################################
-        # Instant buy from a specific owner listing
-        ################################################################
+        # ---- Instant buy ----
 
         @sp.entrypoint
         def buy(self, params):
-            sp.set_type(params, sp.TRecord(owner=sp.TAddress, token_id=sp.TNat, qty=sp.TNat).layout(("owner", ("token_id", "qty"))))
+            sp.cast(params, sp.record(owner=sp.address, token_id=sp.nat, qty=sp.nat))
+            assert params.qty > 0, "BAD_QTY"
+            assert not (sp.sender in self.data.contract_blocklist), "BLOCKED"
+            assert not (sp.record(owner=params.owner, token_id=params.token_id, blocked=sp.sender) in self.data.blacklist), "BLACKLISTED"
+            pk = sp.record(owner=params.owner, token_id=params.token_id)
+            assert pk in self.data.listings, "NOT_FOR_SALE"
+            lst = self.data.listings[pk]
+            if lst.max_qty > 0:
+                assert params.qty <= lst.max_qty, "MAX_QTY"
+            fb = self.data.ledger.get(pk, default=sp.nat(0))
+            assert fb >= params.qty, "NO_BAL"
+            tp = sp.split_tokens(lst.price, params.qty, 1)
+            assert sp.amount == tp, "WRONG_PRICE"
+            tm = self.data.token_market[params.token_id]
+            rr = tm.royalty_recipient
+            ry = sp.split_tokens(tp, tm.royalty_bps, 10_000)
+            po = tp - ry
+            self.data.claimable[rr] = self.data.claimable.get(rr, default=sp.mutez(0)) + ry
+            self.data.claimable[params.owner] = self.data.claimable.get(params.owner, default=sp.mutez(0)) + po
+            nfb = sp.as_nat(fb - params.qty)
+            if nfb == 0:
+                if pk in self.data.ledger:
+                    del self.data.ledger[pk]
+                if pk in self.data.listings:
+                    del self.data.listings[pk]
+            else:
+                self.data.ledger[pk] = nfb
+            tk = sp.record(owner=sp.sender, token_id=params.token_id)
+            tb = self.data.ledger.get(tk, default=sp.nat(0))
+            self.data.ledger[tk] = tb + params.qty
+            sp.emit(sp.record(b=sp.sender, o=params.owner, i=params.token_id, q=params.qty), tag="buy")
 
-            sp.verify(params.qty > 0, "BAD_QTY")
-            sp.verify(~self.is_blacklisted(params.owner, params.token_id, sp.sender), "BLACKLISTED")
-
-            pk = self.price_key(params.owner, params.token_id)
-            sp.verify(self.data.prices.contains(pk), "NOT_FOR_SALE")
-
-            max_qty = self.get_max_buy_qty(params.owner, params.token_id)
-            sp.if max_qty > 0:
-                sp.verify(params.qty <= max_qty, "EXCEEDS_MAX_BUY_QTY")
-
-            sp.verify(self.bal(params.owner, params.token_id) >= params.qty, "OWNER_INSUFFICIENT")
-
-            total_price = self.mul_mutez_nat(self.data.prices[pk], params.qty)
-            sp.verify(sp.amount == total_price, "WRONG_PRICE")
-
-            royalty = sp.split_tokens(total_price, self.data.royalty_bps, 10_000)
-            payout = total_price - royalty
-
-            self.credit(self.data.royalty_recipient, royalty)
-            self.credit(params.owner, payout)
-
-            self.set_bal(params.owner, params.token_id, self.bal(params.owner, params.token_id) - params.qty)
-            self.set_bal(sp.sender, params.token_id, self.bal(sp.sender, params.token_id) + params.qty)
-
-            self.emit("bought", sp.record(
-                buyer=sp.sender, owner=params.owner, token_id=params.token_id, qty=params.qty,
-                total=total_price, royalty=royalty
-            ))
-
-        ################################################################
-        # Token-wide Offers (PARTIAL FILL)
-        ################################################################
+        # ---- Offers (partial fill) ----
 
         @sp.entrypoint
         def make_offer(self, params):
-            sp.set_type(params, sp.TRecord(token_id=sp.TNat, qty=sp.TNat, expiry=sp.TTimestamp).layout(("token_id", ("qty", "expiry"))))
-
-            sp.verify(params.qty > 0, "BAD_QTY")
-            sp.verify(params.expiry > sp.now, "BAD_EXPIRY")
-
-            min_total = self.mul_mutez_nat(self.data.min_offer_per_unit_mutez, params.qty)
-            sp.verify(sp.amount >= min_total, "OFFER_TOO_LOW")
-
-            oc = self.get_owner_count_internal(params.token_id)
-            sp.verify(oc > 0, "NO_OWNERS")
-
-            # unit_price = floor(amount / qty), enforce exact divisibility
-            unit_price = sp.local("unit_price", sp.split_tokens(sp.amount, 1, params.qty))
-            sp.verify(self.mul_mutez_nat(unit_price.value, params.qty) == sp.amount, "AMOUNT_NOT_DIVISIBLE_BY_QTY")
-            sp.verify(unit_price.value > sp.mutez(0), "UNIT_PRICE_ZERO")
-
-            offer_id = self.data.next_offer_id
+            sp.cast(params, sp.record(token_id=sp.nat, qty=sp.nat, expiry=sp.timestamp))
+            assert params.qty > 0, "BAD_QTY"
+            assert not (sp.sender in self.data.contract_blocklist), "BLOCKED"
+            assert params.expiry > sp.now, "BAD_EXPIRY"
+            tm = self.data.token_market[params.token_id]
+            assert sp.amount >= sp.split_tokens(tm.min_offer_per_unit_mutez, params.qty, 1), "OFFER_TOO_LOW"
+            up = sp.split_tokens(sp.amount, 1, params.qty)
+            assert sp.split_tokens(up, params.qty, 1) == sp.amount, "NOT_DIV"
+            assert up > sp.mutez(0), "UNIT_PRICE_ZERO"
+            oid = self.data.next_offer_id
             self.data.next_offer_id += 1
-
-            self.data.offers[offer_id] = sp.record(
-                token_id=params.token_id,
-                buyer=sp.sender,
-                unit_price=unit_price.value,
-                remaining_qty=params.qty,
-                remaining_amount=sp.amount,
-                expiry=params.expiry,
-                active=True,
-                required_rejections=oc,
-                rejected_count=0
-            )
-
-            self.emit("offer_made", sp.record(
-                offer_id=offer_id,
-                token_id=params.token_id,
-                buyer=sp.sender,
-                unit_price=unit_price.value,
-                qty=params.qty,
-                amount=sp.amount,
-                expiry=params.expiry,
-                required_rejections=oc
-            ))
+            self.data.offers[oid] = sp.record(
+                token_id=params.token_id, buyer=sp.sender, unit_price=up,
+                remaining_qty=params.qty, expiry=params.expiry)
 
         @sp.entrypoint
-        def reject_offer(self, offer_id):
-            sp.set_type(offer_id, sp.TNat)
-
-            o = sp.local("o", self.data.offers[offer_id])
-            sp.verify(o.value.active, "NOT_ACTIVE")
-            sp.verify(self.bal(sp.sender, o.value.token_id) > 0, "NOT_OWNER")
-
-            rej_key = sp.record(offer_id=offer_id, owner=sp.sender)
-            sp.verify(~self.data.offer_rejections.contains(rej_key), "ALREADY_REJECTED")
-
-            self.data.offer_rejections[rej_key] = sp.unit
-            o.value.rejected_count += 1
-
-            self.emit("offer_rejected", sp.record(
-                offer_id=offer_id,
-                token_id=o.value.token_id,
-                owner=sp.sender,
-                rejected_count=o.value.rejected_count,
-                required_rejections=o.value.required_rejections
-            ))
-
-            sp.if o.value.rejected_count >= o.value.required_rejections:
-                o.value.active = False
-
-                sp.if o.value.remaining_amount > sp.mutez(0):
-                    self.credit(o.value.buyer, o.value.remaining_amount)
-
-                self.emit("offer_refunded_all_rejected", sp.record(
-                    offer_id=offer_id,
-                    token_id=o.value.token_id,
-                    buyer=o.value.buyer,
-                    amount=o.value.remaining_amount
-                ))
-
-                o.value.remaining_amount = sp.mutez(0)
-                o.value.remaining_qty = 0
-
-            self.data.offers[offer_id] = o.value
-
-        @sp.entrypoint
-        def cancel_offer(self, offer_id):
-            sp.set_type(offer_id, sp.TNat)
-
-            o = sp.local("o", self.data.offers[offer_id])
-            sp.verify(o.value.active, "NOT_ACTIVE")
-            sp.verify(o.value.buyer == sp.sender, "NOT_BUYER")
-
-            o.value.active = False
-
-            sp.if o.value.remaining_amount > sp.mutez(0):
-                self.credit(o.value.buyer, o.value.remaining_amount)
-
-            self.emit("offer_cancelled", sp.record(
-                offer_id=offer_id,
-                token_id=o.value.token_id,
-                buyer=o.value.buyer,
-                refunded=o.value.remaining_amount,
-                remaining_qty=o.value.remaining_qty
-            ))
-
-            o.value.remaining_amount = sp.mutez(0)
-            o.value.remaining_qty = 0
-            self.data.offers[offer_id] = o.value
+        def close_offer(self, offer_id):
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            sp.cast(offer_id, sp.nat)
+            o = self.data.offers[offer_id]
+            assert o.remaining_qty > 0, "NOT_ACTIVE"
+            if o.buyer != sp.sender:
+                assert sp.now > o.expiry, "NO_AUTH"
+            refund = sp.split_tokens(o.unit_price, o.remaining_qty, 1)
+            self.data.claimable[o.buyer] = self.data.claimable.get(o.buyer, default=sp.mutez(0)) + refund
+            o.remaining_qty = sp.nat(0)
+            self.data.offers[offer_id] = o
 
         @sp.entrypoint
         def accept_offer(self, params):
-            sp.set_type(params, sp.TRecord(offer_id=sp.TNat, accept_qty=sp.TNat).layout(("offer_id", "accept_qty")))
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            sp.cast(params, sp.record(offer_id=sp.nat, accept_qty=sp.nat))
+            o = self.data.offers[params.offer_id]
+            assert o.remaining_qty > 0, "NOT_ACTIVE"
+            assert sp.now <= o.expiry, "OFFER_EXPIRED"
+            assert params.accept_qty > 0, "BAD_ACCEPT_QTY"
+            assert params.accept_qty <= o.remaining_qty, "OVER_QTY"
+            tid = o.token_id
+            assert not (o.buyer in self.data.contract_blocklist), "BLOCKED"
+            fk = sp.record(owner=sp.sender, token_id=tid)
+            fb = self.data.ledger.get(fk, default=sp.nat(0))
+            assert fb >= params.accept_qty, "LOW_BAL"
+            assert not (sp.record(owner=sp.sender, token_id=tid, blocked=o.buyer) in self.data.blacklist), "BLACKLISTED"
+            pt = sp.split_tokens(o.unit_price, params.accept_qty, 1)
+            assert pt > sp.mutez(0), "PAY_ZERO"
+            if fk in self.data.listings:
+                lst = self.data.listings[fk]
+                if lst.min_bps > 0:
+                    lt = sp.split_tokens(lst.price, params.accept_qty, 1)
+                    ft = sp.split_tokens(lt, lst.min_bps, 10_000)
+                    assert pt >= ft, "LOW_BID"
+            tm = self.data.token_market[tid]
+            rr = tm.royalty_recipient
+            ry = sp.split_tokens(pt, tm.royalty_bps, 10_000)
+            po = pt - ry
+            self.data.claimable[rr] = self.data.claimable.get(rr, default=sp.mutez(0)) + ry
+            self.data.claimable[sp.sender] = self.data.claimable.get(sp.sender, default=sp.mutez(0)) + po
+            nfb = sp.as_nat(fb - params.accept_qty)
+            if nfb == 0:
+                if fk in self.data.ledger:
+                    del self.data.ledger[fk]
+                if fk in self.data.listings:
+                    del self.data.listings[fk]
+            else:
+                self.data.ledger[fk] = nfb
+            tk = sp.record(owner=o.buyer, token_id=tid)
+            tb = self.data.ledger.get(tk, default=sp.nat(0))
+            self.data.ledger[tk] = tb + params.accept_qty
+            o.remaining_qty = sp.as_nat(o.remaining_qty - params.accept_qty)
+            self.data.offers[params.offer_id] = o
+            sp.emit(sp.record(id=params.offer_id, o=sp.sender, q=params.accept_qty), tag="accept")
 
-            o = sp.local("o", self.data.offers[params.offer_id])
-            sp.verify(o.value.active, "NOT_ACTIVE")
-            sp.verify(sp.now <= o.value.expiry, "OFFER_EXPIRED")
-
-            sp.verify(params.accept_qty > 0, "BAD_ACCEPT_QTY")
-            sp.verify(params.accept_qty <= o.value.remaining_qty, "ACCEPT_EXCEEDS_REMAINING")
-
-            token_id = o.value.token_id
-            sp.verify(self.bal(sp.sender, token_id) >= params.accept_qty, "INSUFFICIENT_BALANCE")
-            sp.verify(~self.is_blacklisted(sp.sender, token_id, o.value.buyer), "BLACKLISTED")
-
-            pay_total = sp.local("pay_total", self.mul_mutez_nat(o.value.unit_price, params.accept_qty))
-            sp.verify(pay_total.value > sp.mutez(0), "PAY_ZERO")
-            sp.verify(pay_total.value <= o.value.remaining_amount, "OFFER_AMOUNT_UNDERFLOW")
-
-            # owner-specific percent-of-list floor for this accepted qty
-            floor = self.owner_floor_total(sp.sender, token_id, params.accept_qty)
-            sp.if floor.fst:
-                sp.verify(pay_total.value >= floor.snd, "BELOW_OWNER_PERCENT_FLOOR")
-
-            royalty = sp.split_tokens(pay_total.value, self.data.royalty_bps, 10_000)
-            payout = pay_total.value - royalty
-
-            self.credit(self.data.royalty_recipient, royalty)
-            self.credit(sp.sender, payout)
-
-            # token transfer
-            self.set_bal(sp.sender, token_id, self.bal(sp.sender, token_id) - params.accept_qty)
-            self.set_bal(o.value.buyer, token_id, self.bal(o.value.buyer, token_id) + params.accept_qty)
-
-            # reduce offer (safe due to verified <=)
-            o.value.remaining_qty = sp.as_nat(o.value.remaining_qty - params.accept_qty)
-            o.value.remaining_amount = o.value.remaining_amount - pay_total.value
-
-            self.emit("offer_partially_accepted", sp.record(
-                offer_id=params.offer_id,
-                token_id=token_id,
-                owner=sp.sender,
-                buyer=o.value.buyer,
-                accept_qty=params.accept_qty,
-                pay_total=pay_total.value,
-                royalty=royalty,
-                remaining_qty=o.value.remaining_qty,
-                remaining_amount=o.value.remaining_amount
-            ))
-
-            sp.if o.value.remaining_qty == 0:
-                o.value.active = False
-
-                sp.if o.value.remaining_amount > sp.mutez(0):
-                    self.credit(o.value.buyer, o.value.remaining_amount)
-                    self.emit("offer_closed_refund_dust", sp.record(
-                        offer_id=params.offer_id,
-                        token_id=token_id,
-                        buyer=o.value.buyer,
-                        amount=o.value.remaining_amount
-                    ))
-                    o.value.remaining_amount = sp.mutez(0)
-
-                self.emit("offer_fully_filled", sp.record(
-                    offer_id=params.offer_id,
-                    token_id=token_id,
-                    buyer=o.value.buyer
-                ))
-
-            self.data.offers[params.offer_id] = o.value
+        # ---- Contract blocklist (admin) ----
 
         @sp.entrypoint
-        def sweep_expired_offer(self, offer_id):
-            sp.set_type(offer_id, sp.TNat)
+        def block_address(self, address):
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            sp.cast(address, sp.address)
+            assert sp.sender == self.data.admin, "NOT_ADMIN"
+            self.data.contract_blocklist[address] = ()
 
-            o = sp.local("o", self.data.offers[offer_id])
-            sp.verify(o.value.active, "NOT_ACTIVE")
-            sp.verify(sp.now > o.value.expiry, "NOT_EXPIRED")
+        @sp.entrypoint
+        def unblock_address(self, address):
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            sp.cast(address, sp.address)
+            assert sp.sender == self.data.admin, "NOT_ADMIN"
+            if address in self.data.contract_blocklist:
+                del self.data.contract_blocklist[address]
 
-            o.value.active = False
-
-            sp.if o.value.remaining_amount > sp.mutez(0):
-                self.credit(o.value.buyer, o.value.remaining_amount)
-
-            self.emit("offer_swept_expired", sp.record(
-                offer_id=offer_id,
-                token_id=o.value.token_id,
-                buyer=o.value.buyer,
-                refunded=o.value.remaining_amount,
-                remaining_qty=o.value.remaining_qty
-            ))
-
-            o.value.remaining_amount = sp.mutez(0)
-            o.value.remaining_qty = 0
-            self.data.offers[offer_id] = o.value
-
-        ################################################################
-        # Blacklist (owner-scoped per token)
-        ################################################################
+        # ---- Blacklist (per-token, owner) ----
 
         @sp.entrypoint
         def blacklist_address(self, params):
-            sp.set_type(params, sp.TRecord(token_id=sp.TNat, blocked=sp.TAddress).layout(("token_id", "blocked")))
-            self.require_owner(params.token_id)
-            self.data.blacklist[sp.record(owner=sp.sender, token_id=params.token_id, blocked=params.blocked)] = sp.unit
-            self.emit("blacklisted", sp.record(owner=sp.sender, token_id=params.token_id, blocked=params.blocked))
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            sp.cast(params, sp.record(token_id=sp.nat, blocked=sp.address))
+            assert self.data.ledger.get(sp.record(owner=sp.sender, token_id=params.token_id), default=sp.nat(0)) > 0, "NOT_OWNER"
+            self.data.blacklist[sp.record(owner=sp.sender, token_id=params.token_id, blocked=params.blocked)] = ()
 
         @sp.entrypoint
         def unblacklist_address(self, params):
-            sp.set_type(params, sp.TRecord(token_id=sp.TNat, blocked=sp.TAddress).layout(("token_id", "blocked")))
-            self.require_owner(params.token_id)
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            sp.cast(params, sp.record(token_id=sp.nat, blocked=sp.address))
+            assert self.data.ledger.get(sp.record(owner=sp.sender, token_id=params.token_id), default=sp.nat(0)) > 0, "NOT_OWNER"
             key = sp.record(owner=sp.sender, token_id=params.token_id, blocked=params.blocked)
-            sp.if self.data.blacklist.contains(key):
+            if key in self.data.blacklist:
                 del self.data.blacklist[key]
-                self.emit("unblacklisted", sp.record(owner=sp.sender, token_id=params.token_id, blocked=params.blocked))
 
-        ################################################################
-        # Withdraw (pull payments)
-        ################################################################
+        # ---- Withdraw ----
 
         @sp.entrypoint
         def withdraw(self):
-            amount = self.data.claimable.get(sp.sender, sp.mutez(0))
-            sp.verify(amount > sp.mutez(0), "NO_FUNDS")
+            assert sp.amount == sp.mutez(0), "NO_TEZ"
+            amount = self.data.claimable.get(sp.sender, default=sp.mutez(0))
+            assert amount > sp.mutez(0), "NO_FUNDS"
             self.data.claimable[sp.sender] = sp.mutez(0)
             sp.send(sp.sender, amount)
-            self.emit("withdrawn", sp.record(owner=sp.sender, amount=amount))
 
-        ################################################################
-        # On-chain views
-        ################################################################
+        # ---- On-chain views ----
 
-        @sp.onchain_view()
-        def get_price(self, params):
-            sp.set_type(params, sp.TRecord(owner=sp.TAddress, token_id=sp.TNat).layout(("owner", "token_id")))
-            sp.result(self.data.prices.get(sp.record(owner=params.owner, token_id=params.token_id), sp.mutez(0)))
+        @sp.onchain_view
+        def get_balance(self, params):
+            sp.cast(params, sp.record(owner=sp.address, token_id=sp.nat))
+            return self.data.ledger.get(sp.record(owner=params.owner, token_id=params.token_id), default=sp.nat(0))
 
-        @sp.onchain_view()
-        def get_controls(self, params):
-            sp.set_type(params, sp.TRecord(owner=sp.TAddress, token_id=sp.TNat).layout(("owner", "token_id")))
-            pk = sp.record(owner=params.owner, token_id=params.token_id)
-            sp.result(sp.record(
-                max_buy_qty=self.data.max_buy_qty.get(pk, 0),
-                min_offer_bps_of_list=self.data.min_offer_bps_of_list.get(pk, 0)
-            ))
-
-        @sp.onchain_view()
+        @sp.onchain_view
         def get_offer(self, offer_id):
-            sp.set_type(offer_id, sp.TNat)
-            sp.result(self.data.offers[offer_id])
+            sp.cast(offer_id, sp.nat)
+            return self.data.offers[offer_id]
 
-        @sp.onchain_view()
-        def has_rejected(self, params):
-            sp.set_type(params, sp.TRecord(offer_id=sp.TNat, owner=sp.TAddress).layout(("offer_id", "owner")))
-            sp.result(self.data.offer_rejections.contains(sp.record(offer_id=params.offer_id, owner=params.owner)))
+        @sp.onchain_view
+        def is_operator(self, params):
+            sp.cast(params, sp.record(owner=sp.address, operator=sp.address, token_id=sp.nat))
+            return sp.record(owner=params.owner, operator=params.operator, token_id=params.token_id) in self.data.operators
 
-        @sp.onchain_view()
-        def is_owner(self, params):
-            sp.set_type(params, sp.TRecord(token_id=sp.TNat, owner=sp.TAddress).layout(("token_id", "owner")))
-            sp.result(self.data.token_owners.contains(sp.record(token_id=params.token_id, owner=params.owner)))
+        @sp.onchain_view
+        def get_listing(self, params):
+            sp.cast(params, sp.record(owner=sp.address, token_id=sp.nat))
+            return self.data.listings[sp.record(owner=params.owner, token_id=params.token_id)]
 
-        @sp.onchain_view()
-        def get_owner_count(self, token_id):
-            sp.set_type(token_id, sp.TNat)
-            sp.result(self.data.owner_count.get(token_id, 0))
+        @sp.onchain_view
+        def get_claimable(self, addr):
+            sp.cast(addr, sp.address)
+            return self.data.claimable.get(addr, default=sp.mutez(0))
 
-        @sp.onchain_view()
-        def is_blacklisted_view(self, params):
-            sp.set_type(params, sp.TRecord(owner=sp.TAddress, token_id=sp.TNat, actor=sp.TAddress).layout(("owner", ("token_id", "actor"))))
-            sp.result(self.is_blacklisted(params.owner, params.token_id, params.actor))
+        @sp.onchain_view
+        def is_blacklisted(self, params):
+            sp.cast(params, sp.record(owner=sp.address, token_id=sp.nat, blocked=sp.address))
+            return params in self.data.blacklist
+
+        @sp.onchain_view
+        def get_token_market(self, token_id):
+            sp.cast(token_id, sp.nat)
+            return self.data.token_market[token_id]
+
+
+@sp.add_test()
+def test():
+    scenario = sp.test_scenario("BowersFA2", main)
+    admin = sp.test_account("admin")
+    c = main.BowersFA2(
+        admin=admin.address,
+        metadata=sp.scenario_utils.metadata_of_url("https://example.com"),
+    )
+    scenario += c

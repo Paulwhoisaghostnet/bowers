@@ -1,6 +1,7 @@
 let tezosModule: any = null;
 let beaconModule: any = null;
 let walletModule: any = null;
+let octezModule: any = null;
 let michelCodecModule: any = null;
 let tzip12Mod: any = null;
 let tzip16Mod: any = null;
@@ -13,12 +14,19 @@ export async function loadTaquito() {
   return tezosModule;
 }
 
+export async function loadOctezConnect() {
+  if (!octezModule) {
+    octezModule = await import("@tezos-x/octez.connect-sdk");
+  }
+  return octezModule;
+}
+
 export async function loadBeaconWallet() {
   if (!walletModule) {
     walletModule = await import("@taquito/beacon-wallet");
   }
   if (!beaconModule) {
-    beaconModule = await import("@airgap/beacon-sdk");
+    beaconModule = await import("@airgap/beacon-dapp");
   }
   return { walletModule, beaconModule };
 }

@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { CONTRACT_STYLES } from "@shared/schema";
 import type { Bower, User, Contract } from "@shared/schema";
 
 type BowerDetail = Bower & { user: User | null };
@@ -164,7 +165,7 @@ export default function BowerDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="text-[10px]">{contract.styleId.replace("fa2-", "FA2 ")}</Badge>
+            <Badge variant="secondary" className="text-[10px]">{CONTRACT_STYLES.find((s) => s.id === contract.styleId)?.name ?? contract.styleId}</Badge>
             {contract.royaltiesEnabled && <Badge variant="secondary" className="text-[10px]">Royalties</Badge>}
           </div>
           <div className="mt-4">

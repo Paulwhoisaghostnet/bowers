@@ -1,0 +1,37 @@
+parameter (unit %check);
+storage   (pair (option %deadline timestamp) (nat %x));
+code
+  {
+    CDR;        # @storage
+    # == check ==
+    # d = self.data.deadline # @storage
+    DUP;        # @storage : @storage
+    CAR;        # option timestamp : @storage
+    # if d.is_some(): # option timestamp : @storage
+    DUP;        # option timestamp : option timestamp : @storage
+    IF_NONE
+      {
+        DROP;       # @storage
+      }
+      {
+        DROP;       # option timestamp : @storage
+        # assert sp.now <= d.unwrap_some(), "CLOSED" # option timestamp : @storage
+        IF_NONE
+          {
+            PUSH int 14; # int : @storage
+            FAILWITH;   # FAILED
+          }
+          {}; # @some : @storage
+        NOW;        # @now : @some : @storage
+        COMPARE;    # int : @storage
+        LE;         # bool : @storage
+        IF
+          {}
+          {
+            PUSH string "CLOSED"; # string : @storage
+            FAILWITH;   # FAILED
+          }; # @storage
+      }; # @storage
+    NIL operation; # list operation : @storage
+    PAIR;       # pair (list operation) @storage
+  };

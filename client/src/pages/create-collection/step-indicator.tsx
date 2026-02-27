@@ -1,13 +1,19 @@
 import { Check } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { STEPS } from "./types";
+import { STEPS_STANDARD } from "./types";
 
-export function StepIndicator({ currentStep }: { currentStep: number }) {
+export function StepIndicator({
+  currentStep,
+  steps = STEPS_STANDARD,
+}: {
+  currentStep: number;
+  steps?: string[];
+}) {
   return (
     <div className="mb-8">
       <div className="flex items-center justify-between mb-2">
-        {STEPS.map((label, i) => (
-          <div key={label} className="flex items-center gap-2 flex-1">
+        {steps.map((label, i) => (
+          <div key={`${label}-${i}`} className="flex items-center gap-2 flex-1">
             <div
               className={`flex items-center justify-center w-8 h-8 rounded-full text-xs font-semibold transition-colors ${
                 i < currentStep
@@ -26,7 +32,7 @@ export function StepIndicator({ currentStep }: { currentStep: number }) {
             >
               {label}
             </span>
-            {i < STEPS.length - 1 && (
+            {i < steps.length - 1 && (
               <div
                 className={`flex-1 h-px mx-2 ${
                   i < currentStep ? "bg-primary" : "bg-muted"
@@ -36,7 +42,7 @@ export function StepIndicator({ currentStep }: { currentStep: number }) {
           </div>
         ))}
       </div>
-      <Progress value={((currentStep + 1) / STEPS.length) * 100} className="h-1" />
+      <Progress value={((currentStep + 1) / steps.length) * 100} className="h-1" />
     </div>
   );
 }

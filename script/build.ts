@@ -2,8 +2,6 @@ import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile } from "fs/promises";
 
-// server deps to bundle to reduce openat(2) syscalls
-// which helps cold start times
 const allowlist = [
   "@google/generative-ai",
   "axios",
@@ -32,6 +30,15 @@ const allowlist = [
   "zod-validation-error",
 ];
 
+async function getExternals() {
+  const pkg = JSON.parse(await readFile("package.json", "utf-8"));
+  const allDeps = [
+    ...Object.keys(pkg.dependencies || {}),
+    ...Object.keys(pkg.devDependencies || {}),
+  ];
+  return allDeps.filter((dep) => !allowlist.includes(dep));
+}
+
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
@@ -39,12 +46,7 @@ async function buildAll() {
   await viteBuild();
 
   console.log("building server...");
-  const pkg = JSON.parse(await readFile("package.json", "utf-8"));
-  const allDeps = [
-    ...Object.keys(pkg.dependencies || {}),
-    ...Object.keys(pkg.devDependencies || {}),
-  ];
-  const externals = allDeps.filter((dep) => !allowlist.includes(dep));
+  const externals = await getExternals();
 
   await esbuild({
     entryPoints: ["server/index.ts"],
@@ -61,7 +63,38 @@ async function buildAll() {
   });
 }
 
-buildAll().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+async function buildNetlify() {
+  await rm("dist", { recursive: true, force: true });
+
+  console.log("building client...");
+  await viteBuild();
+
+  console.log("building netlify function...");
+  await esbuild({
+    entryPoints: ["netlify/functions/api.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/functions/api.js",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    minify: true,
+    external: ["pg-native"],
+    logLevel: "info",
+  });
+}
+
+const mode = process.argv[2];
+
+if (mode === "--netlify") {
+  buildNetlify().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+} else {
+  buildAll().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

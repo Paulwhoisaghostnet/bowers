@@ -8,6 +8,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ThemeProvider } from "@/lib/theme-provider";
 import { WalletProvider } from "@/lib/wallet-context";
+import { NetworkProvider } from "@/lib/network-context";
 import { useAuth } from "@/hooks/use-auth";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
@@ -18,6 +19,9 @@ import BowerDetail from "@/pages/bower-detail";
 import BowerEditor from "@/pages/bower-editor";
 import WalletsPage from "@/pages/wallets-page";
 import FriendsPage from "@/pages/friends-page";
+import AuthPage from "@/pages/auth-page";
+import CollectionPage from "@/pages/collection";
+import ManageContract from "@/pages/manage-contract";
 import NotFound from "@/pages/not-found";
 
 function AuthenticatedRouter() {
@@ -27,6 +31,8 @@ function AuthenticatedRouter() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/create" component={CreateCollection} />
       <Route path="/mint/:id" component={MintToken} />
+      <Route path="/collection/:id" component={CollectionPage} />
+      <Route path="/manage/:id" component={ManageContract} />
       <Route path="/marketplace" component={Marketplace} />
       <Route path="/bower/edit" component={BowerEditor} />
       <Route path="/bower/:id" component={BowerDetail} />
@@ -61,6 +67,7 @@ function AppContent() {
   if (!isAuthenticated) {
     return (
       <Switch>
+        <Route path="/login" component={AuthPage} />
         <Route path="/marketplace">
           <SidebarLayout>
             <Marketplace />
@@ -69,6 +76,11 @@ function AppContent() {
         <Route path="/bower/:id">
           <SidebarLayout>
             <BowerDetail />
+          </SidebarLayout>
+        </Route>
+        <Route path="/collection/:id">
+          <SidebarLayout>
+            <CollectionPage />
           </SidebarLayout>
         </Route>
         <Route>
@@ -113,12 +125,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <WalletProvider>
-          <TooltipProvider>
-            <AppContent />
-            <Toaster />
-          </TooltipProvider>
-        </WalletProvider>
+        <NetworkProvider>
+          <WalletProvider>
+            <TooltipProvider>
+              <AppContent />
+              <Toaster />
+            </TooltipProvider>
+          </WalletProvider>
+        </NetworkProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

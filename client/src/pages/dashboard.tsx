@@ -1,27 +1,28 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, ExternalLink, Paintbrush, Download, Hexagon, Layers, Gem, Users, Crown } from "lucide-react";
+import { Plus, ExternalLink, Paintbrush, Download, Hexagon, Settings2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/use-auth";
 import { shortenAddress } from "@/lib/tezos";
+import { useNetwork } from "@/lib/network-context";
+import { CONTRACT_STYLES } from "@shared/schema";
+import { styleIcons } from "./create-collection/types";
 import type { Contract } from "@shared/schema";
-
-const styleIcons: Record<string, typeof Layers> = {
-  "fa2-basic": Layers,
-  "fa2-royalties": Gem,
-  "fa2-multiminter": Users,
-  "fa2-full": Crown,
-};
 
 function ContractCard({ contract }: { contract: Contract }) {
   const [, navigate] = useLocation();
+  const { explorerBaseUrl } = useNetwork();
   const Icon = styleIcons[contract.styleId] || Hexagon;
 
   return (
-    <Card className="p-4 hover-elevate cursor-pointer group" data-testid={`card-contract-${contract.id}`}>
+    <Card
+      className="p-4 hover-elevate cursor-pointer group"
+      data-testid={`card-contract-${contract.id}`}
+      onClick={() => navigate(`/collection/${contract.id}`)}
+    >
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20">
@@ -41,13 +42,10 @@ function ContractCard({ contract }: { contract: Contract }) {
 
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <Badge variant="secondary" className="text-[10px]">
-          {contract.styleId.replace("fa2-", "FA2 ")}
+          {CONTRACT_STYLES.find((s) => s.id === contract.styleId)?.name ?? contract.styleId}
         </Badge>
         {contract.royaltiesEnabled && (
           <Badge variant="secondary" className="text-[10px]">Royalties</Badge>
-        )}
-        {contract.minterListEnabled && (
-          <Badge variant="secondary" className="text-[10px]">Multi-Minter</Badge>
         )}
       </div>
 
@@ -59,10 +57,18 @@ function ContractCard({ contract }: { contract: Contract }) {
           <Button
             size="icon"
             variant="ghost"
-            onClick={(e) => { e.stopPropagation(); window.open(`https://ghostnet.tzkt.io/${contract.kt1Address}`, "_blank"); }}
+            onClick={(e) => { e.stopPropagation(); window.open(`${explorerBaseUrl}/${contract.kt1Address}`, "_blank"); }}
             data-testid={`button-view-explorer-${contract.id}`}
           >
             <ExternalLink className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={(e) => { e.stopPropagation(); navigate(`/manage/${contract.id}`); }}
+            data-testid={`button-manage-${contract.id}`}
+          >
+            <Settings2 className="w-3.5 h-3.5" />
           </Button>
           <Button
             size="icon"

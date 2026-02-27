@@ -43,7 +43,7 @@ export default function Landing() {
                 Browse
               </Button>
             </a>
-            <a href="/api/login">
+            <a href="/login">
               <Button size="sm" data-testid="button-login">
                 Sign In
               </Button>
@@ -63,7 +63,7 @@ export default function Landing() {
               Deploy FA2 NFT collection contracts on Tezos and create a custom gallery to attract collectors, friends, and followers.
             </p>
             <div className="flex items-center gap-3 flex-wrap">
-              <a href="/api/login">
+              <a href="/login">
                 <Button size="lg" data-testid="button-get-started">
                   Get Started
                   <ArrowRight className="w-4 h-4 ml-2" />

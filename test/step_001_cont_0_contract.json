@@ -1,0 +1,34 @@
+[
+  {
+    "prim": "storage",
+    "args": [ { "prim": "pair", "args": [ { "prim": "option", "args": [ { "prim": "timestamp" } ], "annots": [ "%deadline" ] }, { "prim": "nat", "annots": [ "%x" ] } ] } ]
+  },
+  { "prim": "parameter", "args": [ { "prim": "unit", "annots": [ "%check" ] } ] },
+  {
+    "prim": "code",
+    "args": [
+      [
+        { "prim": "CDR" },
+        { "prim": "DUP" },
+        { "prim": "CAR" },
+        { "prim": "DUP" },
+        {
+          "prim": "IF_NONE",
+          "args": [
+            [ { "prim": "DROP" } ],
+            [
+              { "prim": "DROP" },
+              { "prim": "IF_NONE", "args": [ [ { "prim": "PUSH", "args": [ { "prim": "int" }, { "int": "14" } ] }, { "prim": "FAILWITH" } ], [] ] },
+              { "prim": "NOW" },
+              { "prim": "COMPARE" },
+              { "prim": "LE" },
+              { "prim": "IF", "args": [ [], [ { "prim": "PUSH", "args": [ { "prim": "string" }, { "string": "CLOSED" } ] }, { "prim": "FAILWITH" } ] ] }
+            ]
+          ]
+        },
+        { "prim": "NIL", "args": [ { "prim": "operation" } ] },
+        { "prim": "PAIR" }
+      ]
+    ]
+  }
+]

@@ -45,7 +45,7 @@ export default function FriendsPage() {
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
-      window.location.href = "/api/login";
+      window.location.href = "/login";
     }
   }, [authLoading, isAuthenticated]);
 
@@ -87,7 +87,7 @@ export default function FriendsPage() {
   const handleError = (err: Error) => {
     if (isUnauthorizedError(err)) {
       toast({ title: "Unauthorized", description: "Logging in again...", variant: "destructive" });
-      setTimeout(() => { window.location.href = "/api/login"; }, 500);
+      setTimeout(() => { window.location.href = "/login"; }, 500);
       return;
     }
     toast({ title: "Error", description: err.message, variant: "destructive" });

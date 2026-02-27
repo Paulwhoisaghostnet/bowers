@@ -1,19 +1,49 @@
 import type { Express } from "express";
-import { type Server } from "http";
+import multer from "multer";
 import { storage } from "./storage";
-import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
+import { setupAuth, registerAuthRoutes, isAuthenticated } from "./auth";
 import { insertContractSchema, mintRequestSchema, CONTRACT_STYLES, insertWalletSchema, insertBowerSchema } from "@shared/schema";
+import { pinFile, pinMetadata } from "./ipfs";
+import { getContractTokens } from "./tzkt";
 
-export async function registerRoutes(
-  httpServer: Server,
-  app: Express
-): Promise<Server> {
+const ipfsUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+});
+
+export async function registerRoutes(app: Express): Promise<void> {
 
   await setupAuth(app);
   registerAuthRoutes(app);
 
   app.get("/api/styles", (_req, res) => {
     res.json(CONTRACT_STYLES);
+  });
+
+  app.post("/api/ipfs/upload", ipfsUpload.single("file"), async (req, res) => {
+    try {
+      const file = req.file;
+      if (!file) {
+        return res.status(400).json({ message: "No file uploaded. Use multipart/form-data with field 'file'." });
+      }
+      const result = await pinFile(file.buffer, file.originalname, file.mimetype);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message || "Upload failed" });
+    }
+  });
+
+  app.post("/api/ipfs/metadata", async (req, res) => {
+    try {
+      const metadata = req.body as Record<string, unknown>;
+      if (!metadata || typeof metadata !== "object") {
+        return res.status(400).json({ message: "Request body must be a JSON object." });
+      }
+      const result = await pinMetadata(metadata);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message || "Metadata pin failed" });
+    }
   });
 
   app.get("/api/contracts/detail/:id", async (req, res) => {
@@ -30,7 +60,7 @@ export async function registerRoutes(
 
   app.get("/api/contracts/user/me", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const result = await storage.getContractsByUserId(userId);
       res.json(result);
     } catch (err: any) {
@@ -40,7 +70,7 @@ export async function registerRoutes(
 
   app.post("/api/contracts", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const parsed = insertContractSchema.parse({ ...req.body, userId });
       const contract = await storage.createContract(parsed);
       res.status(201).json(contract);
@@ -91,6 +121,28 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/contracts/:id/tokens", async (req, res) => {
+    try {
+      const contract = await storage.getContractById(req.params.id);
+      if (!contract) {
+        return res.status(404).json({ message: "Contract not found" });
+      }
+      const hasTokenConfig = [
+        "bowers-open-edition",
+        "bowers-allowlist",
+        "bowers-bonding-curve",
+        "bowers-unified",
+        "bowers-mint-oe",
+        "bowers-mint-allowlist",
+        "bowers-mint-bonding-curve",
+      ].includes(contract.styleId);
+      const data = await getContractTokens(contract.kt1Address, hasTokenConfig);
+      res.json({ contract, ...data });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/contracts/:ownerAddress", async (req, res) => {
     try {
       const result = await storage.getContractsByOwner(req.params.ownerAddress);
@@ -102,7 +154,7 @@ export async function registerRoutes(
 
   app.get("/api/wallets", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const result = await storage.getWalletsByUser(userId);
       res.json(result);
     } catch (err: any) {
@@ -112,7 +164,7 @@ export async function registerRoutes(
 
   app.post("/api/wallets", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const existing = await storage.getWalletByAddress(req.body.address);
       if (existing) {
         if (existing.userId === userId) {
@@ -130,7 +182,7 @@ export async function registerRoutes(
 
   app.delete("/api/wallets/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const removed = await storage.removeWallet(req.params.id, userId);
       if (!removed) return res.status(404).json({ message: "Wallet not found" });
       res.json({ success: true });
@@ -141,7 +193,7 @@ export async function registerRoutes(
 
   app.put("/api/wallets/:id/primary", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const wallet = await storage.setPrimaryWallet(req.params.id, userId);
       if (!wallet) return res.status(404).json({ message: "Wallet not found" });
       res.json(wallet);
@@ -161,7 +213,7 @@ export async function registerRoutes(
 
   app.get("/api/bowers/me", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const bower = await storage.getBowerByUserId(userId);
       res.json(bower || null);
     } catch (err: any) {
@@ -182,7 +234,7 @@ export async function registerRoutes(
 
   app.post("/api/bowers", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const existing = await storage.getBowerByUserId(userId);
       if (existing) {
         return res.status(400).json({ message: "You already have a bower. Update it instead." });
@@ -197,8 +249,9 @@ export async function registerRoutes(
 
   app.put("/api/bowers/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const updated = await storage.updateBower(req.params.id, userId, req.body);
+      const userId = req.user.id;
+      const parsed = insertBowerSchema.partial().parse(req.body);
+      const updated = await storage.updateBower(req.params.id, userId, parsed);
       if (!updated) return res.status(404).json({ message: "Bower not found" });
       res.json(updated);
     } catch (err: any) {
@@ -208,7 +261,7 @@ export async function registerRoutes(
 
   app.get("/api/friends", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const result = await storage.getFriends(userId);
       res.json(result);
     } catch (err: any) {
@@ -218,7 +271,7 @@ export async function registerRoutes(
 
   app.get("/api/friends/pending", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const result = await storage.getPendingRequests(userId);
       res.json(result);
     } catch (err: any) {
@@ -228,7 +281,7 @@ export async function registerRoutes(
 
   app.post("/api/friends/request", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const { addresseeId } = req.body;
       if (!addresseeId) return res.status(400).json({ message: "addresseeId required" });
       if (addresseeId === userId) return res.status(400).json({ message: "Cannot friend yourself" });
@@ -242,7 +295,7 @@ export async function registerRoutes(
 
   app.put("/api/friends/:id/accept", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const updated = await storage.acceptFriendRequest(req.params.id, userId);
       if (!updated) return res.status(404).json({ message: "Request not found" });
       res.json(updated);
@@ -253,7 +306,7 @@ export async function registerRoutes(
 
   app.delete("/api/friends/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const removed = await storage.removeFriendship(req.params.id, userId);
       if (!removed) return res.status(404).json({ message: "Friendship not found" });
       res.json({ success: true });
@@ -264,7 +317,7 @@ export async function registerRoutes(
 
   app.get("/api/followers", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const result = await storage.getFollowers(userId);
       res.json(result);
     } catch (err: any) {
@@ -274,7 +327,7 @@ export async function registerRoutes(
 
   app.get("/api/following", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const result = await storage.getFollowing(userId);
       res.json(result);
     } catch (err: any) {
@@ -284,7 +337,7 @@ export async function registerRoutes(
 
   app.post("/api/follow", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const { followedId } = req.body;
       if (!followedId) return res.status(400).json({ message: "followedId required" });
       if (followedId === userId) return res.status(400).json({ message: "Cannot follow yourself" });
@@ -298,7 +351,7 @@ export async function registerRoutes(
 
   app.delete("/api/follow/:followedId", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const removed = await storage.unfollowUser(userId, req.params.followedId);
       if (!removed) return res.status(404).json({ message: "Not following" });
       res.json({ success: true });
@@ -309,8 +362,8 @@ export async function registerRoutes(
 
   app.get("/api/users/search", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const q = req.query.q as string;
+      const userId = req.user.id;
+      const q = String(req.query.q ?? "").slice(0, 100);
       if (!q || q.length < 2) return res.json([]);
       const result = await storage.searchUsers(q, userId);
       res.json(result);
@@ -329,5 +382,4 @@ export async function registerRoutes(
     }
   });
 
-  return httpServer;
 }

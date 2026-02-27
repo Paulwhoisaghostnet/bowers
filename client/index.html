@@ -13,7 +13,7 @@
   <body>
     <script>
       globalThis.global = globalThis;
-      globalThis.Buffer = globalThis.Buffer || { isBuffer: function() { return false; } };
+      // Buffer/global/process provided by vite-plugin-node-polyfills (Beacon SDK).
       globalThis.process = globalThis.process || { env: {}, version: '' };
     </script>
     <div id="root"></div>
