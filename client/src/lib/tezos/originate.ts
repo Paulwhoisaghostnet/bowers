@@ -146,15 +146,9 @@ export async function originateContract(params: OriginateParams): Promise<string
     const storage = await buildFA2Storage(params);
     const code = getCode(params.style.id);
 
-    const est = await t.estimate.originate({ code, storage });
-    const gasLimit = Math.ceil(est.gasLimit * GAS_BUFFER);
-    const storageLimit = Math.ceil(est.storageLimit * STORAGE_BUFFER);
-
     const op = await t.wallet.originate({
       code,
       storage,
-      gasLimit,
-      storageLimit,
     }).send();
 
     await op.confirmation(1);
