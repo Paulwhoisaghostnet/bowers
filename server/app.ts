@@ -97,6 +97,7 @@ export async function createApp() {
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
         if (process.env.NODE_ENV !== "production") return callback(null, true);
+        if (allowedOrigins.length === 0) return callback(null, true);
         if (allowedOrigins.includes(origin)) return callback(null, true);
         callback(new Error("Not allowed by CORS"));
       },
