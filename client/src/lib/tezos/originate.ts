@@ -112,8 +112,8 @@ export interface OriginationEstimate {
   totalCostTez: string;
 }
 
-const GAS_BUFFER = 1.2;
-const STORAGE_BUFFER = 1.2;
+const GAS_BUFFER = 2.0;
+const STORAGE_BUFFER = 1.5;
 
 /**
  * Estimate the gas, storage, and fee cost of originating a contract
@@ -149,15 +149,12 @@ export async function originateContract(params: OriginateParams): Promise<string
     const est = await t.estimate.originate({ code, storage });
     const gasLimit = Math.ceil(est.gasLimit * GAS_BUFFER);
     const storageLimit = Math.ceil(est.storageLimit * STORAGE_BUFFER);
-    const fee = est.suggestedFeeMutez;
 
     const op = await t.wallet.originate({
       code,
       storage,
       gasLimit,
       storageLimit,
-      fee,
-      mutez: true,
     }).send();
 
     await op.confirmation(1);
