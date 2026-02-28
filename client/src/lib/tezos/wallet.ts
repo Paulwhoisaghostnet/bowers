@@ -149,6 +149,10 @@ export async function getTezos(network?: string) {
     const { Tzip16Module } = await loadTzip16();
     tezos.addExtension(new Tzip12Module());
     tezos.addExtension(new Tzip16Module());
+
+    if (adapter) {
+      adapter.setAsTaquitoProvider(tezos);
+    }
   }
   return tezos;
 }
