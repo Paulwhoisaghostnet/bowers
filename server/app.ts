@@ -23,9 +23,6 @@ export function log(message: string, source = "express") {
 }
 
 export async function createApp() {
-  // #region agent log
-  fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',location:'server/app.ts:createApp:start',message:'createApp entered',data:{hasDbUrl:!!process.env.DATABASE_URL,hasSessionSecret:!!process.env.SESSION_SECRET,nodeEnv:process.env.NODE_ENV},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-  // #endregion
   const app = express();
 
   app.use(
@@ -134,18 +131,7 @@ export async function createApp() {
     next();
   });
 
-  // #region agent log
-  fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',location:'server/app.ts:createApp:preSeed',message:'about to seed and register routes',data:{},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-  // #endregion
-  await seedDatabase().catch((err) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',location:'server/app.ts:createApp:seedFail',message:'seed failed',data:{error:err?.message},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
-    console.error("Seed error:", err);
-  });
-  // #region agent log
-  fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',location:'server/app.ts:createApp:preRoutes',message:'seed done, registering routes',data:{},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-  // #endregion
+  await seedDatabase().catch((err) => console.error("Seed error:", err));
   await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
