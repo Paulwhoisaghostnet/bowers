@@ -1,8 +1,13 @@
 import "dotenv/config";
 import { defineConfig } from "drizzle-kit";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL environment variable is required. See .env.example");
+const dbUrl =
+  process.env.DATABASE_URL ||
+  process.env.NETLIFY_DATABASE_URL_UNPOOLED ||
+  process.env.NETLIFY_DATABASE_URL;
+
+if (!dbUrl) {
+  throw new Error("DATABASE_URL (or NETLIFY_DATABASE_URL_UNPOOLED) is required. See .env.example");
 }
 
 export default defineConfig({
@@ -10,6 +15,6 @@ export default defineConfig({
   schema: "./shared/schema.ts",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL,
+    url: dbUrl,
   },
 });
