@@ -1,4 +1,4 @@
-import { loadTaquito, loadOctezConnect, loadBeaconWallet, loadTzip12, loadTzip16, RPC_URLS } from "./loaders";
+import { loadTaquito, loadOctezConnect, loadBeaconWallet, loadTzip12, loadTzip16, loadUtils, RPC_URLS } from "./loaders";
 
 export type WalletProviderName = "octez.connect" | "beacon";
 
@@ -8,6 +8,39 @@ interface WalletAdapter {
   getActiveAccount(): Promise<string | null>;
   clearActiveAccount(): Promise<void>;
   setAsTaquitoProvider(tezos: any): void;
+}
+
+/**
+ * Wraps a BeaconWallet instance to implement Taquito's Signer interface.
+ * BeaconWallet v24 has getPKH/getPK/sign but NOT publicKeyHash/publicKey,
+ * and its sign() returns a bare string instead of {bytes, sig, prefixSig, sbytes}.
+ */
+class BeaconSigner {
+  constructor(private wallet: any) {}
+
+  async publicKeyHash(): Promise<string> {
+    return this.wallet.getPKH();
+  }
+
+  async publicKey(): Promise<string> {
+    return this.wallet.getPK();
+  }
+
+  async secretKey(): Promise<string> {
+    throw new Error("Secret key not available through Beacon wallet");
+  }
+
+  async sign(
+    bytes: string,
+    watermark?: Uint8Array,
+  ): Promise<{ bytes: string; sig: string; prefixSig: string; sbytes: string }> {
+    const prefixSig: string = await this.wallet.sign(bytes, watermark);
+    const utils = await loadUtils();
+    const [rawSig] = utils.b58DecodeAndCheckPrefix(prefixSig, utils.signaturePrefixes);
+    const sig = utils.b58Encode(rawSig, "GenericSignature");
+    const sbytes = bytes + utils.buf2hex(rawSig);
+    return { bytes, sig, prefixSig, sbytes };
+  }
 }
 
 let tezos: any = null;
@@ -59,7 +92,7 @@ class OctezConnectAdapter implements WalletAdapter {
   setAsTaquitoProvider(t: any): void {
     if (this.beaconWallet) {
       t.setWalletProvider(this.beaconWallet);
-      t.setSignerProvider(this.beaconWallet);
+      t.setSignerProvider(new BeaconSigner(this.beaconWallet));
     }
   }
 }
@@ -108,7 +141,7 @@ class BeaconLegacyAdapter implements WalletAdapter {
 
   setAsTaquitoProvider(t: any): void {
     t.setWalletProvider(this.wallet);
-    t.setSignerProvider(this.wallet);
+    t.setSignerProvider(new BeaconSigner(this.wallet));
   }
 }
 
