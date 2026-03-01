@@ -112,29 +112,11 @@ export interface OriginationEstimate {
   totalCostTez: string;
 }
 
-// Keep hard minimums high enough to avoid wallet-side underestimation on complex originations.
-const MIN_GAS_LIMIT = 900_000;
+// Hard minimums — unused gas/storage is not charged, so overshoot is safe.
+const MIN_GAS_LIMIT = 1_040_000;
 const MIN_STORAGE_LIMIT = 120_000;
 const GAS_BUFFER = 1.5;
 const STORAGE_BUFFER = 1.5;
-const MIN_FEE_MUTEZ = 80_000;
-const RETRY_GAS_LIMIT = 1_030_000;
-const RETRY_STORAGE_LIMIT = 200_000;
-const RETRY_FEE_MUTEZ = 120_000;
-
-function isLowGasError(err: unknown): boolean {
-  const message = String(
-    (err as any)?.message ??
-      (err as any)?.description ??
-      (err as any)?.data?.[1]?.with?.string ??
-      "",
-  );
-  return (
-    /gas limit is too low/i.test(message) ||
-    /minimum of 100 gas units/i.test(message) ||
-    /gas.*minimum/i.test(message)
-  );
-}
 
 /**
  * Estimate the gas, storage, and fee cost of originating a contract
@@ -162,6 +144,14 @@ export async function estimateOrigination(params: OriginateParams): Promise<Orig
   return { gasLimit, storageLimit, suggestedFeeMutez, burnFeeMutez, totalCostTez };
 }
 
+/**
+ * Originate a contract using t.contract.originate() instead of t.wallet.originate().
+ *
+ * The wallet API hands raw operation params to the wallet extension (Temple/Kukai),
+ * which re-estimates gas from scratch and ignores any limits we provide.
+ * The contract API forges the operation bytes with our limits baked in, then sends
+ * the forged bytes to the wallet for signing — the wallet cannot alter the gas.
+ */
 export async function originateContract(params: OriginateParams): Promise<string> {
   const t = await getTezos();
   const { getCode } = await import("./michelson");
@@ -187,58 +177,24 @@ export async function originateContract(params: OriginateParams): Promise<string
       // estimation failed; use safe defaults
     }
 
-    const attempts = [
-      { gasLimit, storageLimit, fee: MIN_FEE_MUTEZ },
-      { gasLimit: RETRY_GAS_LIMIT, storageLimit: RETRY_STORAGE_LIMIT, fee: RETRY_FEE_MUTEZ },
-    ];
+    const op = await t.contract.originate({
+      code,
+      storage,
+      gasLimit,
+      storageLimit,
+    });
 
-    let lastErr: unknown;
-    for (const attempt of attempts) {
-      try {
-        const op = await t.wallet
-          .originate({
-            code,
-            storage,
-            gasLimit: attempt.gasLimit,
-            storageLimit: attempt.storageLimit,
-            fee: attempt.fee,
-            // Some wallet stacks prefer rpc-style keys; include both to avoid dropping limits.
-            gas_limit: String(attempt.gasLimit),
-            storage_limit: String(attempt.storageLimit),
-          } as any)
-          .send();
+    await op.confirmation(1);
 
-        await op.confirmation(1);
-
-        const contractAddress =
-          (op as any).contractAddress ??
-          (op as any).operationResults?.[0]?.metadata?.operation_result?.originated_contracts?.[0];
-
-        if (contractAddress && contractAddress.startsWith("KT1")) {
-          return contractAddress;
-        }
-
-        const receipt = await t.rpc.getBlock();
-        for (const ops of receipt.operations) {
-          for (const entry of ops) {
-            if (entry.hash === op.opHash) {
-              const originated =
-                (entry as any).contents?.[0]?.metadata?.operation_result?.originated_contracts?.[0];
-              if (originated) return originated;
-            }
-          }
-        }
-
-        throw new Error(
-          `Contract originated (op: ${op.opHash}) but could not retrieve KT1 address. ` +
-            `Check the operation on a block explorer.`,
-        );
-      } catch (err: any) {
-        lastErr = err;
-        if (!isLowGasError(err)) throw err;
-      }
+    const contractAddress = op.contractAddress;
+    if (!contractAddress || !contractAddress.startsWith("KT1")) {
+      throw new Error(
+        `Contract originated (op: ${op.hash}) but could not retrieve KT1 address. ` +
+          `Check the operation on a block explorer.`,
+      );
     }
-    throw lastErr;
+
+    return contractAddress;
   } catch (err: any) {
     if (err.message?.includes("Aborted")) {
       throw new Error("Transaction was rejected in wallet");
