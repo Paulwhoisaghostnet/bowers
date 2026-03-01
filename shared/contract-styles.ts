@@ -71,7 +71,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "Standard TZIP-12 token ledger with transfer, balance_of, and update_operators. Required for all contracts.",
     category: "core",
     required: true,
-    estimatedKB: 8,
+    estimatedKB: 3,
     entrypoints: ["transfer", "balance_of", "update_operators"],
     views: ["get_balance", "is_operator"],
     features: ["FA2 compliant (TZIP-12)", "TZIP-21 rich metadata"],
@@ -84,7 +84,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "On-chain royalty distribution. A percentage of every sale or accepted offer is sent to a single royalty recipient.",
     category: "core",
     required: false,
-    estimatedKB: 2,
+    estimatedKB: 1,
     entrypoints: [],
     views: [],
     features: ["On-chain royalties"],
@@ -97,7 +97,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "Only the contract admin can mint new tokens with custom metadata and supply. Standard Objkt-style minting.",
     category: "mint",
     required: false,
-    estimatedKB: 4,
+    estimatedKB: 1,
     entrypoints: ["mint"],
     views: [],
     features: ["Admin-only minting"],
@@ -110,7 +110,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "Anyone can mint editions by paying a set price. Admin creates token templates with price, end date, and max supply controls.",
     category: "mint",
     required: false,
-    estimatedKB: 7,
+    estimatedKB: 2,
     entrypoints: ["create_token", "mint_editions", "set_mint_price", "set_mint_end", "set_mint_paused"],
     views: ["get_token_config"],
     features: ["Open-edition minting", "Per-token mint controls"],
@@ -123,7 +123,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "Phased drops: only allowlisted addresses can mint during the allowlist phase (per-address cap, optional price override). After the phase ends, standard open-edition minting applies.",
     category: "mint",
     required: false,
-    estimatedKB: 4,
+    estimatedKB: 1,
     entrypoints: ["set_allowlist", "clear_allowlist", "set_allowlist_end"],
     views: ["get_allowlist_entry", "is_allowlisted"],
     features: ["Phased drops", "Per-address caps", "Early access pricing"],
@@ -136,7 +136,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "Price increases as more editions are minted. Admin creates token factories with base price, increment, and step size. Early minters pay less.",
     category: "mint",
     required: false,
-    estimatedKB: 8,
+    estimatedKB: 2,
     entrypoints: ["create_token", "mint_editions", "set_mint_paused", "set_mint_end"],
     views: ["get_token_config", "get_current_price"],
     features: ["Bonding curve pricing", "Per-token mint controls"],
@@ -149,7 +149,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "Admin can mint multiple tokens or distribute to many addresses in one transaction. Supports airdrops and gas-efficient batch minting.",
     category: "admin",
     required: false,
-    estimatedKB: 3,
+    estimatedKB: 1,
     entrypoints: ["batch_mint", "batch_transfer_single", "airdrop"],
     views: [],
     features: ["Batch minting", "Airdrops", "Multi-recipient distribution"],
@@ -162,7 +162,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "Multiple royalty recipients with configurable basis-point shares. Replaces single royalty recipient with per-contract or per-token split configuration.",
     category: "core",
     required: false,
-    estimatedKB: 4,
+    estimatedKB: 1,
     entrypoints: ["set_payment_splits", "set_token_splits", "clear_token_splits"],
     views: ["get_payment_splits", "get_token_splits"],
     features: ["Multi-recipient royalties", "Per-token split overrides"],
@@ -175,7 +175,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "Token owners can list tokens for sale at a fixed price. Buyers pay exact amount to purchase. Includes pull-payment withdraw.",
     category: "market",
     required: false,
-    estimatedKB: 6,
+    estimatedKB: 2,
     entrypoints: ["set_listing", "buy", "withdraw"],
     views: ["get_listing", "get_claimable"],
     features: ["Consolidated listings", "Pull payments"],
@@ -188,7 +188,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "Buyers can make offers on tokens. Owners can accept full or partial quantities. Offers auto-expire after 7 days.",
     category: "market",
     required: false,
-    estimatedKB: 6,
+    estimatedKB: 2,
     entrypoints: ["make_offer", "accept_offer", "close_offer"],
     views: ["get_offer"],
     features: ["Partial-fill offers", "7-day auto-expiry"],
@@ -201,7 +201,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "Per-owner, per-token address blocking. Prevents blacklisted addresses from buying or receiving specific tokens.",
     category: "admin",
     required: false,
-    estimatedKB: 3,
+    estimatedKB: 1,
     entrypoints: ["blacklist_address", "unblacklist_address"],
     views: ["is_blacklisted"],
     features: ["Per-owner blacklist"],
@@ -214,7 +214,7 @@ export const CONTRACT_MODULES: ContractModule[] = [
     description: "Admin-maintained contract-level blocklist. Blocked addresses cannot transfer, receive, buy, or mint. Enforced in FA2 transfer so objkt/teia purchases fail at the token contract.",
     category: "admin",
     required: false,
-    estimatedKB: 2,
+    estimatedKB: 1,
     entrypoints: ["block_address", "unblock_address"],
     views: [],
     features: ["Contract-level blocklist", "Transfer enforcement", "Self-sovereign gatekeeping"],
@@ -223,8 +223,12 @@ export const CONTRACT_MODULES: ContractModule[] = [
   },
 ];
 
-/** Maximum compiled Michelson size for a Tezos contract (~60 KB practical limit) */
-export const MAX_CONTRACT_SIZE_KB = 60;
+/**
+ * Maximum estimated contract code size (KB) that can deploy within
+ * the Tezos max_operation_data_length of 32,768 bytes. The remaining
+ * ~8 KB covers initial storage, operation headers, and the signature.
+ */
+export const MAX_CONTRACT_SIZE_KB = 24;
 
 /**
  * Given a set of selected module IDs, resolve the best matching pre-compiled

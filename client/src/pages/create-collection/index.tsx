@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   CONTRACT_STYLES,
+  MAX_CONTRACT_SIZE_KB,
   resolveStyleFromModules,
   computeModuleAggregates,
   validateModuleSelection,
@@ -98,7 +99,9 @@ export default function CreateCollection() {
   const canProceed = () => {
     if (currentStepName === "Contract Style") return !!state.styleId;
     if (currentStepName === "Modules") {
-      return validateModuleSelection(state.selectedModules).length === 0;
+      if (validateModuleSelection(state.selectedModules).length > 0) return false;
+      const { estimatedKB } = computeModuleAggregates(state.selectedModules);
+      return estimatedKB <= MAX_CONTRACT_SIZE_KB;
     }
     if (currentStepName === "Configuration") {
       return !!(state.name && state.symbol);

@@ -112,16 +112,13 @@ export interface OriginationEstimate {
   totalCostTez: string;
 }
 
-// Protocol hard caps: gas 1,040,000 / storage 60,000 per operation.
-// Unused gas/storage is not charged, so using the caps is safe.
-const MIN_GAS_LIMIT = 1_040_000;
-const MIN_STORAGE_LIMIT = 60_000;
-const GAS_BUFFER = 1.5;
-const STORAGE_BUFFER = 1.5;
+const GAS_BUFFER = 1.2;
+const STORAGE_BUFFER = 1.2;
 
 /**
  * Estimate the gas, storage, and fee cost of originating a contract
- * without actually sending it. Returns values with a safety buffer applied.
+ * without actually sending it. BeaconSigner provides the publicKeyHash()
+ * and publicKey() that Taquito's estimator needs.
  */
 export async function estimateOrigination(params: OriginateParams): Promise<OriginationEstimate> {
   const t = await getTezos();
@@ -132,8 +129,8 @@ export async function estimateOrigination(params: OriginateParams): Promise<Orig
 
   const estimate = await t.estimate.originate({ code, storage });
 
-  const gasLimit = Math.min(MIN_GAS_LIMIT, Math.max(estimate.gasLimit, Math.ceil(estimate.gasLimit * GAS_BUFFER)));
-  const storageLimit = Math.min(MIN_STORAGE_LIMIT, Math.max(estimate.storageLimit, Math.ceil(estimate.storageLimit * STORAGE_BUFFER)));
+  const gasLimit = Math.ceil(estimate.gasLimit * GAS_BUFFER);
+  const storageLimit = Math.ceil(estimate.storageLimit * STORAGE_BUFFER);
   const suggestedFeeMutez = estimate.suggestedFeeMutez;
   const burnFeeMutez = estimate.burnFeeMutez;
   const totalCostMutez = suggestedFeeMutez + burnFeeMutez;
@@ -143,12 +140,11 @@ export async function estimateOrigination(params: OriginateParams): Promise<Orig
 }
 
 /**
- * Originate via t.wallet.originate() with explicit gas/storage/fee limits.
- *
- * The BeaconSigner adapter (in wallet.ts) provides publicKeyHash()/publicKey()
- * so Taquito's internal estimation succeeds. We still pass explicit limits as a
- * safety net — all three must be present for the PrepareProvider to skip its own
- * estimation and use our values directly.
+ * Originate via t.wallet.originate(). With BeaconSigner properly configured
+ * (see wallet.ts), Taquito can estimate gas/storage automatically. We run
+ * our own estimate first and pass the results as explicit limits with a
+ * safety buffer. If estimation fails, we omit limits and let the wallet
+ * handle it natively.
  */
 export async function originateContract(params: OriginateParams): Promise<string> {
   const t = await getTezos();
@@ -158,26 +154,18 @@ export async function originateContract(params: OriginateParams): Promise<string
     const storage = await buildFA2Storage(params);
     const code = getCode(params.style.id);
 
-    let gasLimit = MIN_GAS_LIMIT;
-    let storageLimit = MIN_STORAGE_LIMIT;
-    let fee = 100_000;
+    let originateOpts: Record<string, any> = { code, storage };
     try {
       const est = await t.estimate.originate({ code, storage });
-      if (est.gasLimit > 0) {
-        gasLimit = Math.min(MIN_GAS_LIMIT, Math.ceil(est.gasLimit * GAS_BUFFER));
-      }
-      if (est.storageLimit > 0) {
-        storageLimit = Math.min(MIN_STORAGE_LIMIT, Math.ceil(est.storageLimit * STORAGE_BUFFER));
-      }
-      if (est.suggestedFeeMutez > 0) {
-        fee = Math.max(fee, Math.ceil(est.suggestedFeeMutez * 1.2));
-      }
+      originateOpts.gasLimit = Math.ceil(est.gasLimit * GAS_BUFFER);
+      originateOpts.storageLimit = Math.ceil(est.storageLimit * STORAGE_BUFFER);
+      originateOpts.fee = Math.ceil(est.suggestedFeeMutez * 1.2);
     } catch {
-      // estimation failed; use safe defaults
+      // Estimation unavailable; wallet will estimate natively
     }
 
     const op = await t.wallet
-      .originate({ code, storage, gasLimit, storageLimit, fee })
+      .originate(originateOpts)
       .send();
 
     await op.confirmation(1);

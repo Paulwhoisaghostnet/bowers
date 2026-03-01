@@ -200,11 +200,15 @@ export function StepModules({
                   value={sizePercent}
                   className="h-2"
                 />
-                {sizePercent > 85 && (
+                {estimatedKB > MAX_CONTRACT_SIZE_KB ? (
+                  <p className="text-[10px] text-destructive font-medium">
+                    Exceeds Tezos operation size limit — remove modules to continue
+                  </p>
+                ) : sizePercent > 85 ? (
                   <p className="text-[10px] text-amber-600 dark:text-amber-400">
                     Approaching Tezos size limit
                   </p>
-                )}
+                ) : null}
               </div>
 
               <div className="space-y-1">

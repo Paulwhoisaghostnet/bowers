@@ -13,10 +13,10 @@ mkdir -p "$MICHELSON_DIR"
 
 export SMARTPY_OUTPUT_DIR="$OUTPUT_DIR"
 
-# Check for SmartPy
-if ! python3 -c "import smartpy" 2>/dev/null; then
-  echo "SmartPy not found. Install with: pip install smartpy-tezos"
-  echo "Or use a venv: python3 -m venv .venv && source .venv/bin/activate && pip install smartpy-tezos"
+# Check for SmartPy CLI (from smartpy.io — not the pip `smartpy` package)
+if ! python3 -c "import smartpy; assert hasattr(smartpy, 'module')" 2>/dev/null; then
+  echo "SmartPy CLI not found. The @sp.module syntax requires the SmartPy CLI from https://smartpy.io"
+  echo "Download: https://smartpy.io/cli  (the pip 'smartpy' package is unrelated)"
   exit 1
 fi
 
