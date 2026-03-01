@@ -112,8 +112,29 @@ export interface OriginationEstimate {
   totalCostTez: string;
 }
 
-const MIN_GAS_LIMIT = 200_000;
-const MIN_STORAGE_LIMIT = 60_000;
+// Keep hard minimums high enough to avoid wallet-side underestimation on complex originations.
+const MIN_GAS_LIMIT = 900_000;
+const MIN_STORAGE_LIMIT = 120_000;
+const GAS_BUFFER = 1.5;
+const STORAGE_BUFFER = 1.5;
+const MIN_FEE_MUTEZ = 80_000;
+const RETRY_GAS_LIMIT = 1_030_000;
+const RETRY_STORAGE_LIMIT = 200_000;
+const RETRY_FEE_MUTEZ = 120_000;
+
+function isLowGasError(err: unknown): boolean {
+  const message = String(
+    (err as any)?.message ??
+      (err as any)?.description ??
+      (err as any)?.data?.[1]?.with?.string ??
+      "",
+  );
+  return (
+    /gas limit is too low/i.test(message) ||
+    /minimum of 100 gas units/i.test(message) ||
+    /gas.*minimum/i.test(message)
+  );
+}
 
 /**
  * Estimate the gas, storage, and fee cost of originating a contract
@@ -128,8 +149,11 @@ export async function estimateOrigination(params: OriginateParams): Promise<Orig
 
   const estimate = await t.estimate.originate({ code, storage });
 
-  const gasLimit = Math.ceil(estimate.gasLimit * GAS_BUFFER);
-  const storageLimit = Math.ceil(estimate.storageLimit * STORAGE_BUFFER);
+  const gasLimit = Math.max(MIN_GAS_LIMIT, Math.ceil(estimate.gasLimit * GAS_BUFFER));
+  const storageLimit = Math.max(
+    MIN_STORAGE_LIMIT,
+    Math.ceil(estimate.storageLimit * STORAGE_BUFFER),
+  );
   const suggestedFeeMutez = estimate.suggestedFeeMutez;
   const burnFeeMutez = estimate.burnFeeMutez;
   const totalCostMutez = suggestedFeeMutez + burnFeeMutez;
@@ -150,42 +174,71 @@ export async function originateContract(params: OriginateParams): Promise<string
     let storageLimit = MIN_STORAGE_LIMIT;
     try {
       const est = await t.estimate.originate({ code, storage });
-      if (est.gasLimit > 100) gasLimit = Math.ceil(est.gasLimit * 1.5);
-      if (est.storageLimit > 0) storageLimit = Math.ceil(est.storageLimit * 1.5);
+      if (est.gasLimit > 0) {
+        gasLimit = Math.max(MIN_GAS_LIMIT, Math.ceil(est.gasLimit * GAS_BUFFER));
+      }
+      if (est.storageLimit > 0) {
+        storageLimit = Math.max(
+          MIN_STORAGE_LIMIT,
+          Math.ceil(est.storageLimit * STORAGE_BUFFER),
+        );
+      }
     } catch {
       // estimation failed; use safe defaults
     }
 
-    const op = await t.wallet.originate({
-      code,
-      storage,
-      gasLimit,
-      storageLimit,
-    }).send();
+    const attempts = [
+      { gasLimit, storageLimit, fee: MIN_FEE_MUTEZ },
+      { gasLimit: RETRY_GAS_LIMIT, storageLimit: RETRY_STORAGE_LIMIT, fee: RETRY_FEE_MUTEZ },
+    ];
 
-    await op.confirmation(1);
+    let lastErr: unknown;
+    for (const attempt of attempts) {
+      try {
+        const op = await t.wallet
+          .originate({
+            code,
+            storage,
+            gasLimit: attempt.gasLimit,
+            storageLimit: attempt.storageLimit,
+            fee: attempt.fee,
+            // Some wallet stacks prefer rpc-style keys; include both to avoid dropping limits.
+            gas_limit: String(attempt.gasLimit),
+            storage_limit: String(attempt.storageLimit),
+          } as any)
+          .send();
 
-    const contractAddress =
-      (op as any).contractAddress ??
-      (op as any).operationResults?.[0]?.metadata?.operation_result?.originated_contracts?.[0];
+        await op.confirmation(1);
 
-    if (!contractAddress || !contractAddress.startsWith("KT1")) {
-      const receipt = await t.rpc.getBlock();
-      for (const ops of receipt.operations) {
-        for (const entry of ops) {
-          if (entry.hash === op.opHash) {
-            const originated = (entry as any).contents?.[0]?.metadata?.operation_result?.originated_contracts?.[0];
-            if (originated) return originated;
+        const contractAddress =
+          (op as any).contractAddress ??
+          (op as any).operationResults?.[0]?.metadata?.operation_result?.originated_contracts?.[0];
+
+        if (contractAddress && contractAddress.startsWith("KT1")) {
+          return contractAddress;
+        }
+
+        const receipt = await t.rpc.getBlock();
+        for (const ops of receipt.operations) {
+          for (const entry of ops) {
+            if (entry.hash === op.opHash) {
+              const originated =
+                (entry as any).contents?.[0]?.metadata?.operation_result?.originated_contracts?.[0];
+              if (originated) return originated;
+            }
           }
         }
-      }
-      throw new Error(
-        `Contract originated (op: ${op.opHash}) but could not retrieve KT1 address. ` +
-        `Check the operation on a block explorer.`
-      );
-    }
 
-    return contractAddress;
+        throw new Error(
+          `Contract originated (op: ${op.opHash}) but could not retrieve KT1 address. ` +
+            `Check the operation on a block explorer.`,
+        );
+      } catch (err: any) {
+        lastErr = err;
+        if (!isLowGasError(err)) throw err;
+      }
+    }
+    throw lastErr;
   } catch (err: any) {
     if (err.message?.includes("Aborted")) {
       throw new Error("Transaction was rejected in wallet");
