@@ -112,9 +112,10 @@ export interface OriginationEstimate {
   totalCostTez: string;
 }
 
-// Hard minimums — unused gas/storage is not charged, so overshoot is safe.
+// Protocol hard caps: gas 1,040,000 / storage 60,000 per operation.
+// Unused gas/storage is not charged, so using the caps is safe.
 const MIN_GAS_LIMIT = 1_040_000;
-const MIN_STORAGE_LIMIT = 120_000;
+const MIN_STORAGE_LIMIT = 60_000;
 const GAS_BUFFER = 1.5;
 const STORAGE_BUFFER = 1.5;
 
@@ -131,11 +132,8 @@ export async function estimateOrigination(params: OriginateParams): Promise<Orig
 
   const estimate = await t.estimate.originate({ code, storage });
 
-  const gasLimit = Math.max(MIN_GAS_LIMIT, Math.ceil(estimate.gasLimit * GAS_BUFFER));
-  const storageLimit = Math.max(
-    MIN_STORAGE_LIMIT,
-    Math.ceil(estimate.storageLimit * STORAGE_BUFFER),
-  );
+  const gasLimit = Math.min(MIN_GAS_LIMIT, Math.max(estimate.gasLimit, Math.ceil(estimate.gasLimit * GAS_BUFFER)));
+  const storageLimit = Math.min(MIN_STORAGE_LIMIT, Math.max(estimate.storageLimit, Math.ceil(estimate.storageLimit * STORAGE_BUFFER)));
   const suggestedFeeMutez = estimate.suggestedFeeMutez;
   const burnFeeMutez = estimate.burnFeeMutez;
   const totalCostMutez = suggestedFeeMutez + burnFeeMutez;
@@ -165,13 +163,10 @@ export async function originateContract(params: OriginateParams): Promise<string
     try {
       const est = await t.estimate.originate({ code, storage });
       if (est.gasLimit > 0) {
-        gasLimit = Math.max(MIN_GAS_LIMIT, Math.ceil(est.gasLimit * GAS_BUFFER));
+        gasLimit = Math.min(MIN_GAS_LIMIT, Math.ceil(est.gasLimit * GAS_BUFFER));
       }
       if (est.storageLimit > 0) {
-        storageLimit = Math.max(
-          MIN_STORAGE_LIMIT,
-          Math.ceil(est.storageLimit * STORAGE_BUFFER),
-        );
+        storageLimit = Math.min(MIN_STORAGE_LIMIT, Math.ceil(est.storageLimit * STORAGE_BUFFER));
       }
     } catch {
       // estimation failed; use safe defaults
