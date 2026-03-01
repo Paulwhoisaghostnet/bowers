@@ -59,6 +59,7 @@ class OctezConnectAdapter implements WalletAdapter {
   setAsTaquitoProvider(t: any): void {
     if (this.beaconWallet) {
       t.setWalletProvider(this.beaconWallet);
+      t.setSignerProvider(this.beaconWallet);
     }
   }
 }
@@ -107,6 +108,7 @@ class BeaconLegacyAdapter implements WalletAdapter {
 
   setAsTaquitoProvider(t: any): void {
     t.setWalletProvider(this.wallet);
+    t.setSignerProvider(this.wallet);
   }
 }
 
