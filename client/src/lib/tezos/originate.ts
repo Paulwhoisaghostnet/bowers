@@ -143,12 +143,12 @@ export async function estimateOrigination(params: OriginateParams): Promise<Orig
 }
 
 /**
- * Originate a contract using t.contract.originate() instead of t.wallet.originate().
+ * Originate via t.wallet.originate() with explicit gas/storage/fee limits.
  *
- * The wallet API hands raw operation params to the wallet extension (Temple/Kukai),
- * which re-estimates gas from scratch and ignores any limits we provide.
- * The contract API forges the operation bytes with our limits baked in, then sends
- * the forged bytes to the wallet for signing — the wallet cannot alter the gas.
+ * The BeaconSigner adapter (in wallet.ts) provides publicKeyHash()/publicKey()
+ * so Taquito's internal estimation succeeds. We still pass explicit limits as a
+ * safety net — all three must be present for the PrepareProvider to skip its own
+ * estimation and use our values directly.
  */
 export async function originateContract(params: OriginateParams): Promise<string> {
   const t = await getTezos();
@@ -160,6 +160,7 @@ export async function originateContract(params: OriginateParams): Promise<string
 
     let gasLimit = MIN_GAS_LIMIT;
     let storageLimit = MIN_STORAGE_LIMIT;
+    let fee = 100_000;
     try {
       const est = await t.estimate.originate({ code, storage });
       if (est.gasLimit > 0) {
@@ -168,23 +169,36 @@ export async function originateContract(params: OriginateParams): Promise<string
       if (est.storageLimit > 0) {
         storageLimit = Math.min(MIN_STORAGE_LIMIT, Math.ceil(est.storageLimit * STORAGE_BUFFER));
       }
+      if (est.suggestedFeeMutez > 0) {
+        fee = Math.max(fee, Math.ceil(est.suggestedFeeMutez * 1.2));
+      }
     } catch {
       // estimation failed; use safe defaults
     }
 
-    const op = await t.contract.originate({
-      code,
-      storage,
-      gasLimit,
-      storageLimit,
-    });
+    const op = await t.wallet
+      .originate({ code, storage, gasLimit, storageLimit, fee })
+      .send();
 
     await op.confirmation(1);
 
-    const contractAddress = op.contractAddress;
+    const contractAddress =
+      (op as any).contractAddress ??
+      (op as any).operationResults?.[0]?.metadata?.operation_result?.originated_contracts?.[0];
+
     if (!contractAddress || !contractAddress.startsWith("KT1")) {
+      const receipt = await t.rpc.getBlock();
+      for (const ops of receipt.operations) {
+        for (const entry of ops) {
+          if (entry.hash === op.opHash) {
+            const originated =
+              (entry as any).contents?.[0]?.metadata?.operation_result?.originated_contracts?.[0];
+            if (originated) return originated;
+          }
+        }
+      }
       throw new Error(
-        `Contract originated (op: ${op.hash}) but could not retrieve KT1 address. ` +
+        `Contract originated (op: ${op.opHash}) but could not retrieve KT1 address. ` +
           `Check the operation on a block explorer.`,
       );
     }
