@@ -13,10 +13,10 @@ mkdir -p "$MICHELSON_DIR"
 
 export SMARTPY_OUTPUT_DIR="$OUTPUT_DIR"
 
-# Check for SmartPy CLI (from smartpy.io — not the pip `smartpy` package)
+# Check for smartpy-tezos (pip install smartpy-tezos)
 if ! python3 -c "import smartpy; assert hasattr(smartpy, 'module')" 2>/dev/null; then
-  echo "SmartPy CLI not found. The @sp.module syntax requires the SmartPy CLI from https://smartpy.io"
-  echo "Download: https://smartpy.io/cli  (the pip 'smartpy' package is unrelated)"
+  echo "SmartPy not found. Install with: pip install smartpy-tezos"
+  echo "If 'smartpy' (hydrology package) is installed, uninstall it first: pip uninstall smartpy"
   exit 1
 fi
 
