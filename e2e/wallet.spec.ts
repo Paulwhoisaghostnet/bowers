@@ -8,7 +8,7 @@ test.describe("Wallet and network UI", () => {
 
   test("network badge is present when authenticated", async ({ page }) => {
     await page.goto("/login");
-    const networkBadge = page.getByText(/ghostnet|mainnet/i);
+    const networkBadge = page.getByText(/shadownet|mainnet/i);
     // On the login page, network toggle may or may not be visible;
     // verify it does not throw an error
     const count = await networkBadge.count();

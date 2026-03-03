@@ -87,7 +87,9 @@ export default function CreateCollection() {
         if (!cancelled) setEstimate(est);
       })
       .catch((err) => {
-        if (!cancelled) setEstimateError(err?.message || "Unknown estimation error");
+        if (!cancelled) {
+          setEstimateError("Could not estimate on this RPC. You can still deploy; wallet will estimate at signing.");
+        }
       })
       .finally(() => {
         if (!cancelled) setIsEstimating(false);

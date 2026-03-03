@@ -2,6 +2,13 @@ import { loadTaquito, loadOctezConnect, loadBeaconWallet, loadTzip12, loadTzip16
 
 export type WalletProviderName = "octez.connect" | "beacon";
 
+function resolveNetworkType(network: string, NetworkType: any): string {
+  if (network === "mainnet") return NetworkType.MAINNET;
+  if (network === "ghostnet" && NetworkType.GHOSTNET) return NetworkType.GHOSTNET;
+  if (network === "shadownet" && NetworkType.SHADOWNET) return NetworkType.SHADOWNET;
+  return NetworkType.CUSTOM || "custom";
+}
+
 interface WalletAdapter {
   name: WalletProviderName;
   requestPermissions(): Promise<string>;
@@ -45,7 +52,8 @@ class BeaconSigner {
 
 let tezos: any = null;
 let adapter: WalletAdapter | null = null;
-let currentNetwork: string = "ghostnet";
+let adapterPromise: Promise<WalletAdapter> | null = null;
+let currentNetwork: string = "shadownet";
 
 const CONNECTION_STABILIZATION_MS = 500;
 
@@ -56,7 +64,7 @@ class OctezConnectAdapter implements WalletAdapter {
 
   async init(network: string, rpcUrl: string) {
     const mod = await loadOctezConnect();
-    const networkType = network === "mainnet" ? mod.NetworkType.MAINNET : mod.NetworkType.GHOSTNET;
+    const networkType = resolveNetworkType(network, mod.NetworkType);
     this.client = mod.getDAppClientInstance({
       name: "Bowers",
       iconUrl: "/favicon.png",
@@ -68,7 +76,7 @@ class OctezConnectAdapter implements WalletAdapter {
       this.beaconWallet = new BeaconWallet({
         name: "Bowers",
         iconUrl: "/favicon.png",
-        network: { type: networkType, rpcUrl },
+        network: { type: networkType, name: network, rpcUrl },
       });
     } catch {
       this.beaconWallet = null;
@@ -93,6 +101,9 @@ class OctezConnectAdapter implements WalletAdapter {
     if (this.beaconWallet) {
       t.setWalletProvider(this.beaconWallet);
       t.setSignerProvider(new BeaconSigner(this.beaconWallet));
+      // #region agent log
+      fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',runId:'run1',hypothesisId:'H1',location:'wallet.ts:96',message:'Octez adapter applied providers',data:{adapter:'octez.connect',hasBeaconWallet:!!this.beaconWallet,hasGetPKH:typeof this.beaconWallet?.getPKH==='function',hasGetPK:typeof this.beaconWallet?.getPK==='function'},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
     }
   }
 }
@@ -107,11 +118,11 @@ class BeaconLegacyAdapter implements WalletAdapter {
     const { BeaconWallet } = walletModule;
     const { NetworkType, BeaconEvent } = beaconModule;
     this.BeaconEvent = BeaconEvent;
-    const networkType = network === "mainnet" ? NetworkType.MAINNET : NetworkType.GHOSTNET;
+    const networkType = resolveNetworkType(network, NetworkType);
     this.wallet = new BeaconWallet({
       name: "Bowers",
       iconUrl: "/favicon.png",
-      network: { type: networkType, rpcUrl },
+      network: { type: networkType, name: network, rpcUrl },
     });
   }
 
@@ -139,30 +150,72 @@ class BeaconLegacyAdapter implements WalletAdapter {
     await this.wallet.clearActiveAccount();
   }
 
+  getClient(): any {
+    return this.wallet?.client ?? null;
+  }
+
   setAsTaquitoProvider(t: any): void {
     t.setWalletProvider(this.wallet);
     t.setSignerProvider(new BeaconSigner(this.wallet));
+    // #region agent log
+    fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',runId:'run1',hypothesisId:'H1',location:'wallet.ts:145',message:'Beacon adapter applied providers',data:{adapter:'beacon',hasWallet:!!this.wallet,hasGetPKH:typeof this.wallet?.getPKH==='function',hasGetPK:typeof this.wallet?.getPK==='function'},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
   }
 }
 
-async function createAdapter(network: string, rpcUrl: string): Promise<WalletAdapter> {
+function clearStaleBeaconState() {
   try {
-    const octez = new OctezConnectAdapter();
-    await octez.init(network, rpcUrl);
-    console.log("[Bowers] Wallet provider: octez.connect");
-    return octez;
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith("beacon:") || key.startsWith("beacon-sdk:"))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+    if (keysToRemove.length > 0) {
+      console.log(`[Bowers] Cleared ${keysToRemove.length} stale Beacon keys`);
+    }
+  } catch {}
+}
+
+let beaconStateCleared = false;
+
+async function createAdapter(network: string, rpcUrl: string): Promise<WalletAdapter> {
+  if (!beaconStateCleared) {
+    clearStaleBeaconState();
+    beaconStateCleared = true;
+  }
+  // #region agent log
+  fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',runId:'run3',hypothesisId:'H8',location:'wallet.ts:createAdapter',message:'createAdapter called',data:{network,rpcUrl},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  const beacon = new BeaconLegacyAdapter();
+  try {
+    await beacon.init(network, rpcUrl);
+    console.log("[Bowers] Wallet provider: Beacon");
+    // #region agent log
+    fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',runId:'run3',hypothesisId:'H8',location:'wallet.ts:createAdapter-beacon-ok',message:'Beacon adapter initialised OK',data:{network},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    return beacon;
   } catch (err) {
-    console.warn("[Bowers] octez.connect unavailable, falling back to Beacon SDK:", err);
+    // #region agent log
+    fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',runId:'run3',hypothesisId:'H8',location:'wallet.ts:createAdapter-beacon-fail',message:'Beacon init failed',data:{error:String(err)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    console.warn("[Bowers] Beacon unavailable:", err);
   }
 
-  const beacon = new BeaconLegacyAdapter();
-  await beacon.init(network, rpcUrl);
-  console.log("[Bowers] Wallet provider: Beacon (legacy fallback)");
-  return beacon;
+  const octez = new OctezConnectAdapter();
+  await octez.init(network, rpcUrl);
+  console.log("[Bowers] Wallet provider: octez.connect (fallback)");
+  return octez;
 }
 
 export function getActiveProviderName(): WalletProviderName | null {
   return adapter?.name ?? null;
+}
+
+export function getCurrentNetwork(): string {
+  return currentNetwork;
 }
 
 export function setActiveNetwork(network: string) {
@@ -170,6 +223,7 @@ export function setActiveNetwork(network: string) {
     currentNetwork = network;
     tezos = null;
     adapter = null;
+    adapterPromise = null;
   }
 }
 
@@ -178,7 +232,7 @@ export async function getTezos(network?: string) {
   if (!tezos || net !== currentNetwork) {
     currentNetwork = net;
     const { TezosToolkit } = await loadTaquito();
-    tezos = new TezosToolkit(RPC_URLS[net] || RPC_URLS.ghostnet);
+    tezos = new TezosToolkit(RPC_URLS[net] || RPC_URLS.shadownet);
 
     const { Tzip12Module } = await loadTzip12();
     const { Tzip16Module } = await loadTzip16();
@@ -187,17 +241,25 @@ export async function getTezos(network?: string) {
 
     if (adapter) {
       adapter.setAsTaquitoProvider(tezos);
+      // #region agent log
+      fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',runId:'run1',hypothesisId:'H2',location:'wallet.ts:192',message:'getTezos reused adapter provider',data:{network:net,providerName:adapter?.name??null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
     }
   }
   return tezos;
 }
 
 async function ensureAdapter(): Promise<WalletAdapter> {
-  if (!adapter) {
-    const rpcUrl = RPC_URLS[currentNetwork] || RPC_URLS.ghostnet;
-    adapter = await createAdapter(currentNetwork, rpcUrl);
+  if (adapter) return adapter;
+  if (!adapterPromise) {
+    const rpcUrl = RPC_URLS[currentNetwork] || RPC_URLS.shadownet;
+    adapterPromise = createAdapter(currentNetwork, rpcUrl).then((a) => {
+      adapter = a;
+      adapterPromise = null;
+      return a;
+    });
   }
-  return adapter;
+  return adapterPromise;
 }
 
 export async function getWallet() {
@@ -205,16 +267,16 @@ export async function getWallet() {
 }
 
 export async function connectWallet(): Promise<string> {
-  if (adapter) {
-    await adapter.clearActiveAccount();
-    adapter = null;
-  }
-
   const a = await ensureAdapter();
+  await a.clearActiveAccount();
+
   const address = await a.requestPermissions();
 
   const t = await getTezos();
   a.setAsTaquitoProvider(t);
+  // #region agent log
+  fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',runId:'run1',hypothesisId:'H2',location:'wallet.ts:223',message:'connectWallet applied provider after permissions',data:{providerName:a.name,addressPrefix:address?.slice?.(0,6)??null},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   await new Promise((r) => setTimeout(r, CONNECTION_STABILIZATION_MS));
   return address;
 }
@@ -223,7 +285,6 @@ export async function disconnectWallet(): Promise<void> {
   const a = await ensureAdapter();
   await a.clearActiveAccount();
   tezos = null;
-  adapter = null;
 }
 
 export async function getActiveAccount(): Promise<string | null> {

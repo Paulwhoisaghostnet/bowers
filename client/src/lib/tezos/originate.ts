@@ -1,6 +1,6 @@
 import type { ContractStyle } from "@shared/schema";
 import { loadTaquito, loadUtils } from "./loaders";
-import { getTezos } from "./wallet";
+import { getTezos, getCurrentNetwork } from "./wallet";
 
 export interface OriginateParams {
   name: string;
@@ -112,8 +112,53 @@ export interface OriginationEstimate {
   totalCostTez: string;
 }
 
-const GAS_BUFFER = 1.2;
-const STORAGE_BUFFER = 1.2;
+const GAS_BUFFER = 1.5;
+const STORAGE_BUFFER = 1.5;
+const MIN_GAS_ORIGINATE = 10_000;
+const MAX_STORAGE_ORIGINATE = 60_000;
+const FALLBACK_ESTIMATE: OriginationEstimate = {
+  gasLimit: 300_000,
+  storageLimit: 20_000,
+  suggestedFeeMutez: 15_000,
+  burnFeeMutez: 5_000,
+  totalCostTez: "0.020000",
+};
+
+const EXPECTED_CHAIN_IDS: Record<string, string> = {
+  shadownet: "NetXsqzbfFenSTS",
+  mainnet: "NetXdQprcVkpaWU",
+};
+
+async function verifyNetwork(tezos: any, expectedNetwork: string): Promise<void> {
+  const expectedChainId = EXPECTED_CHAIN_IDS[expectedNetwork];
+  if (!expectedChainId) return;
+
+  try {
+    const actualChainId = await tezos.rpc.getChainId();
+    if (actualChainId !== expectedChainId) {
+      const actualName = Object.entries(EXPECTED_CHAIN_IDS)
+        .find(([, id]) => id === actualChainId)?.[0] ?? "unknown";
+      throw new Error(
+        `Network mismatch: app is set to ${expectedNetwork} but your wallet/RPC ` +
+        `is on ${actualName} (chain ${actualChainId}). ` +
+        `Please switch your wallet to ${expectedNetwork} and try again.`,
+      );
+    }
+  } catch (err: any) {
+    if (err.message?.includes("Network mismatch")) throw err;
+    console.warn("[Bowers] Could not verify chain ID:", err);
+  }
+}
+
+function isRpcSimulationFailure(err: any): boolean {
+  const message = String(err?.message || err || "");
+  return (
+    message.includes("gas_limit_too_high") ||
+    message.includes("gas_exhausted.block") ||
+    message.includes("Http error response: (500)") ||
+    message.includes("Failed to fetch")
+  );
+}
 
 /**
  * Estimate the gas, storage, and fee cost of originating a contract
@@ -122,80 +167,92 @@ const STORAGE_BUFFER = 1.2;
  */
 export async function estimateOrigination(params: OriginateParams): Promise<OriginationEstimate> {
   const t = await getTezos();
+  await verifyNetwork(t, getCurrentNetwork());
   const { getCode } = await import("./michelson");
 
   const storage = await buildFA2Storage(params);
   const code = getCode(params.style.id);
+  // #region agent log
+  fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',runId:'run1',hypothesisId:'H3',location:'originate.ts:130',message:'estimateOrigination start',data:{styleId:params.style.id,codeLength:Array.isArray(code)?code.length:null},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
-  const estimate = await t.estimate.originate({ code, storage });
+  let estimate: any;
+  try {
+    estimate = await t.estimate.originate({ code, storage });
+  } catch (err: any) {
+    if (isRpcSimulationFailure(err)) {
+      console.warn("[Bowers] Estimation RPC failed; using fallback estimate.", err?.message || err);
+      return FALLBACK_ESTIMATE;
+    }
+    throw err;
+  }
 
-  const gasLimit = Math.ceil(estimate.gasLimit * GAS_BUFFER);
-  const storageLimit = Math.ceil(estimate.storageLimit * STORAGE_BUFFER);
+  const gasLimit = Math.max(Math.ceil(estimate.gasLimit * GAS_BUFFER), MIN_GAS_ORIGINATE);
+  const storageLimit = Math.min(Math.ceil(estimate.storageLimit * STORAGE_BUFFER), MAX_STORAGE_ORIGINATE);
   const suggestedFeeMutez = estimate.suggestedFeeMutez;
   const burnFeeMutez = estimate.burnFeeMutez;
   const totalCostMutez = suggestedFeeMutez + burnFeeMutez;
   const totalCostTez = (totalCostMutez / 1_000_000).toFixed(6);
+  // #region agent log
+  fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',runId:'run1',hypothesisId:'H3',location:'originate.ts:141',message:'estimateOrigination success',data:{rawGas:estimate.gasLimit,rawStorage:estimate.storageLimit,bufferedGas:gasLimit,bufferedStorage:storageLimit,suggestedFeeMutez},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   return { gasLimit, storageLimit, suggestedFeeMutez, burnFeeMutez, totalCostTez };
 }
 
 /**
- * Originate via t.wallet.originate(). With BeaconSigner properly configured
- * (see wallet.ts), Taquito can estimate gas/storage automatically. We run
- * our own estimate first and pass the results as explicit limits with a
- * safety buffer. If estimation fails, we omit limits and let the wallet
- * handle it natively.
+ * Originate a contract via Taquito's Wallet API (canonical approach from
+ * https://taquito.io/docs/24.0.0/originate). The connected wallet (Temple,
+ * Kukai, etc.) handles gas estimation and signing via Beacon's
+ * requestOperation.
+ *
+ * Known issue: Kukai wallet on protocol 024 (Tallinn) has a bug where its
+ * internal simulate_operation call uses gas_limit=0, which the protocol
+ * rejects. If this happens, the user should reconnect with Temple wallet.
  */
 export async function originateContract(params: OriginateParams): Promise<string> {
   const t = await getTezos();
+  await verifyNetwork(t, getCurrentNetwork());
   const { getCode } = await import("./michelson");
 
+  const storage = await buildFA2Storage(params);
+  const code = getCode(params.style.id);
+
   try {
-    const storage = await buildFA2Storage(params);
-    const code = getCode(params.style.id);
-
-    let originateOpts: Record<string, any> = { code, storage };
-    try {
-      const est = await t.estimate.originate({ code, storage });
-      originateOpts.gasLimit = Math.ceil(est.gasLimit * GAS_BUFFER);
-      originateOpts.storageLimit = Math.ceil(est.storageLimit * STORAGE_BUFFER);
-      originateOpts.fee = Math.ceil(est.suggestedFeeMutez * 1.2);
-    } catch {
-      // Estimation unavailable; wallet will estimate natively
-    }
-
-    const op = await t.wallet
-      .originate(originateOpts)
+    const originationOp = await t.wallet
+      .originate({ code, storage })
       .send();
 
-    await op.confirmation(1);
-
-    const contractAddress =
-      (op as any).contractAddress ??
-      (op as any).operationResults?.[0]?.metadata?.operation_result?.originated_contracts?.[0];
+    console.log(`[Bowers] Waiting for confirmation of origination...`);
+    const contract = await originationOp.contract();
+    const contractAddress = contract.address;
 
     if (!contractAddress || !contractAddress.startsWith("KT1")) {
-      const receipt = await t.rpc.getBlock();
-      for (const ops of receipt.operations) {
-        for (const entry of ops) {
-          if (entry.hash === op.opHash) {
-            const originated =
-              (entry as any).contents?.[0]?.metadata?.operation_result?.originated_contracts?.[0];
-            if (originated) return originated;
-          }
-        }
-      }
       throw new Error(
-        `Contract originated (op: ${op.opHash}) but could not retrieve KT1 address. ` +
+        `Contract originated (op: ${originationOp.opHash}) but KT1 address not found. ` +
           `Check the operation on a block explorer.`,
       );
     }
 
     return contractAddress;
   } catch (err: any) {
-    if (err.message?.includes("Aborted")) {
-      throw new Error("Transaction was rejected in wallet");
+    const isAbort =
+      err?.errorType === "ABORTED_ERROR" ||
+      err?.message?.includes("Aborted");
+    const isUnknown = err?.errorType === "UNKNOWN_ERROR";
+
+    if (isAbort || isUnknown) {
+      throw new Error(
+        "Contract deployment failed in wallet. " +
+          "Kukai wallet has a known issue with contract origination on the current Tezos protocol. " +
+          "Please disconnect and reconnect using Temple wallet (browser extension) to deploy contracts.",
+      );
     }
+
+    if (err?.errorType) {
+      throw new Error(`Wallet error: ${err.errorType}${err.description ? ` — ${err.description}` : ""}`);
+    }
+
     throw err;
   }
 }

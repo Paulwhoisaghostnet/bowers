@@ -1,5 +1,6 @@
 import { loadUtils } from "./loaders";
 import { getTezos } from "./wallet";
+import { isMintOnlyStyle } from "@/pages/create-collection/types";
 
 export interface MintParams {
   contractAddress: string;
@@ -72,7 +73,7 @@ async function mintViaCreateToken(
   contract: any,
   params: MintParams,
   metadataUri: string,
-  editions: number,
+  _editions: number,
   stringToBytes: (s: string) => string,
 ): Promise<string> {
   const isBondingCurve =
@@ -83,12 +84,18 @@ async function mintViaCreateToken(
     params.styleId === "bowers-allowlist" ||
     params.styleId === "bowers-mint-allowlist";
 
+  const mintOnly = isMintOnlyStyle(params.styleId);
+
   const createParams: Record<string, any> = {
     metadata_uri: stringToBytes(metadataUri),
     creator: params.owner,
     royalty_recipient: params.royaltyRecipient,
     royalty_bps: params.royaltyBps,
   };
+
+  if (!mintOnly) {
+    createParams.min_offer_per_unit_mutez = params.minOfferPerUnitMutez ?? 100000;
+  }
 
   if (isBondingCurve) {
     createParams.base_price = params.mintPriceMutez ?? 1_000_000;
@@ -106,20 +113,8 @@ async function mintViaCreateToken(
     createParams.allowlist_end = null;
   }
 
-  const batch = contract.methods.create_token(createParams);
-  const createOp = await batch.send();
+  const createOp = await contract.methodsObject.create_token(createParams).send();
   await createOp.confirmation(1);
-
-  if (editions > 0 && params.mintPriceMutez === 0) {
-    const mintOp = await contract.methodsObject.mint_editions({
-      token_id: 0,
-      qty: editions,
-      to_: params.owner,
-    }).send();
-    await mintOp.confirmation(1);
-    return mintOp.opHash;
-  }
-
   return createOp.opHash;
 }
 

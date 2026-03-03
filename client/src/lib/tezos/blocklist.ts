@@ -89,3 +89,21 @@ export async function setMintPrice(
     handleTxError(err);
   }
 }
+
+export async function setMintEnd(
+  contractAddress: string,
+  tokenId: number,
+  mintEnd: string | null,
+): Promise<string> {
+  try {
+    const contract = await getContract(contractAddress);
+    const op = await contract.methodsObject.set_mint_end({
+      token_id: tokenId,
+      mint_end: mintEnd,
+    }).send();
+    await op.confirmation(1);
+    return op.opHash;
+  } catch (err: any) {
+    handleTxError(err);
+  }
+}

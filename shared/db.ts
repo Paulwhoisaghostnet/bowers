@@ -20,7 +20,7 @@ export const contracts = pgTable("contracts", {
   minterListEnabled: boolean("minter_list_enabled").notNull().default(false),
   metadataBaseUri: text("metadata_base_uri").default(""),
   options: jsonb("options").$type<Record<string, unknown>>().default({}),
-  network: text("network").notNull().default("ghostnet"),
+  network: text("network").notNull().default("shadownet"),
   status: text("status").notNull().default("deployed"),
   tokenCount: integer("token_count").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow(),

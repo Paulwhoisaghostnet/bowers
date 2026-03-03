@@ -56,6 +56,21 @@ export function hasCreateTokenFlow(styleId: string): boolean {
   ].includes(styleId);
 }
 
+export function hasAllowlistControls(styleId: string): boolean {
+  return [
+    "bowers-allowlist",
+    "bowers-unified",
+    "bowers-mint-allowlist",
+  ].includes(styleId);
+}
+
+export function isBondingCurveStyle(styleId: string): boolean {
+  return [
+    "bowers-bonding-curve",
+    "bowers-mint-bonding-curve",
+  ].includes(styleId);
+}
+
 export interface WizardState {
   styleId: string;
   name: string;

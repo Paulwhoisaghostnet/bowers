@@ -12,6 +12,7 @@ import {
   Hexagon,
   Loader2,
   Coins,
+  Lock,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -85,6 +86,10 @@ export interface TokenCardProps {
   tokenConfig?: TokenConfig;
   walletAddress?: string;
   isOpenEdition?: boolean;
+  /** When true, show disabled marketplace action placeholders for non-owners */
+  hasMarketplace?: boolean;
+  /** Called when an unauthenticated user taps "Connect Wallet" */
+  onConnectWallet?: () => void;
 }
 
 function mutezToTez(mutez: number): string {
@@ -141,6 +146,8 @@ export function TokenCard({
   tokenConfig,
   walletAddress,
   isOpenEdition,
+  hasMarketplace,
+  onConnectWallet,
 }: TokenCardProps) {
   const { toast } = useToast();
   const invalidate = () => {
@@ -318,6 +325,18 @@ export function TokenCard({
         )}
 
         <div className="flex flex-wrap gap-1.5 pt-1">
+          {/* No wallet connected – prompt to connect */}
+          {!walletAddress && (listing || (isOpenEdition && tokenConfig && !tokenConfig.mintPaused) || hasMarketplace) && onConnectWallet && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs w-full"
+              onClick={(e) => { e.stopPropagation(); onConnectWallet(); }}
+            >
+              <Wallet className="w-3 h-3" /> Connect Wallet to Interact
+            </Button>
+          )}
+
           {/* Owner actions */}
           {isOwner && !listing && (
             <Dialog open={listDialog} onOpenChange={setListDialog}>
@@ -421,6 +440,18 @@ export function TokenCard({
             </Dialog>
           )}
 
+          {/* Non-owner: disabled placeholders for owner-only actions */}
+          {walletAddress && !isOwner && hasMarketplace && !listing && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs opacity-50 cursor-not-allowed" disabled title="You don't own this token">
+              <Lock className="w-3 h-3" /> List
+            </Button>
+          )}
+          {walletAddress && !isOwner && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs opacity-50 cursor-not-allowed" disabled title="You don't own this token">
+              <Lock className="w-3 h-3" /> Transfer
+            </Button>
+          )}
+
           {/* Offer accept (owner sees incoming offers) */}
           {isOwner &&
             offers
@@ -438,7 +469,7 @@ export function TokenCard({
               ))}
 
           {/* Non-owner: Buy */}
-          {!isOwner && listing && (
+          {walletAddress && !isOwner && listing && (
             <Dialog open={buyDialog} onOpenChange={setBuyDialog}>
               <DialogTrigger asChild>
                 <Button variant="default" size="sm" className="gap-1.5 text-xs">
@@ -480,7 +511,7 @@ export function TokenCard({
           )}
 
           {/* Non-owner: Make offer */}
-          {!isOwner && (
+          {walletAddress && !isOwner && hasMarketplace && (
             <Dialog open={offerDialog} onOpenChange={setOfferDialog}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-1.5 text-xs">
@@ -541,7 +572,7 @@ export function TokenCard({
           ))}
 
           {/* Open Edition: Mint */}
-          {isOpenEdition && tokenConfig && !tokenConfig.mintPaused && (
+          {walletAddress && isOpenEdition && tokenConfig && !tokenConfig.mintPaused && (
             <Dialog open={mintDialog} onOpenChange={setMintDialog}>
               <DialogTrigger asChild>
                 <Button variant="default" size="sm" className="gap-1.5 text-xs">
@@ -591,6 +622,11 @@ export function TokenCard({
               loading={txMutation.isPending}
               variant="secondary"
             />
+          )}
+
+          {/* Non-owner hint when wallet is connected but no actions shown */}
+          {walletAddress && !isOwner && !listing && !(isOpenEdition && tokenConfig && !tokenConfig.mintPaused) && !hasMarketplace && (
+            <p className="text-[10px] text-muted-foreground italic">You don't own this token</p>
           )}
         </div>
       </div>

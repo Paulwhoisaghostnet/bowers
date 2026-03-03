@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, type ReactNode } from
 import { RPC_URLS } from "./tezos/loaders";
 import { setActiveNetwork } from "./tezos/wallet";
 
-export type TezosNetwork = "ghostnet" | "mainnet";
+export type TezosNetwork = "shadownet" | "mainnet";
 
 interface NetworkContextType {
   network: TezosNetwork;
@@ -13,20 +13,20 @@ interface NetworkContextType {
 }
 
 const EXPLORER_URLS: Record<TezosNetwork, string> = {
-  ghostnet: "https://ghostnet.tzkt.io",
+  shadownet: "https://shadownet.tzkt.io",
   mainnet: "https://tzkt.io",
 };
 
 const NetworkContext = createContext<NetworkContextType>({
-  network: "ghostnet",
-  rpcUrl: RPC_URLS.ghostnet,
-  explorerBaseUrl: EXPLORER_URLS.ghostnet,
+  network: "shadownet",
+  rpcUrl: RPC_URLS.shadownet,
+  explorerBaseUrl: EXPLORER_URLS.shadownet,
   setNetwork: () => {},
   isMainnet: false,
 });
 
 export function NetworkProvider({ children }: { children: ReactNode }) {
-  const [network, setNetworkState] = useState<TezosNetwork>("ghostnet");
+  const [network, setNetworkState] = useState<TezosNetwork>("shadownet");
 
   const setNetwork = useCallback((n: TezosNetwork) => {
     setNetworkState(n);
@@ -37,7 +37,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
     <NetworkContext.Provider
       value={{
         network,
-        rpcUrl: RPC_URLS[network] || RPC_URLS.ghostnet,
+        rpcUrl: RPC_URLS[network] || RPC_URLS.shadownet,
         explorerBaseUrl: EXPLORER_URLS[network],
         setNetwork,
         isMainnet: network === "mainnet",

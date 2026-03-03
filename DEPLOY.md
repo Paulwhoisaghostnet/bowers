@@ -192,7 +192,7 @@ The app ships with Ghostnet (testnet) as the default. To switch to Mainnet:
 
 1. **In the UI:** Click the network badge in the sidebar to toggle between Ghostnet and Mainnet. The wallet, RPC, and explorer links all switch automatically.
 
-2. **CSP headers:** The server already allows both `ghostnet.ecadinfra.com` and `mainnet.ecadinfra.com` in its Content Security Policy.
+2. **CSP headers:** The server already allows both `shadownet.tezos.ecadinfra.com` and `mainnet.ecadinfra.com` in its Content Security Policy.
 
 3. **Wallet reconnection:** When switching networks, users need to reconnect their wallet — the Beacon SDK creates network-specific sessions.
 
@@ -205,7 +205,7 @@ The app ships with Ghostnet (testnet) as the default. To switch to Mainnet:
 - [ ] Verify the site loads at your deployment URL
 - [ ] Test wallet connection (install Temple or Kukai wallet extension)
 - [ ] Create a test collection on Ghostnet
-- [ ] Verify the contract appears on [ghostnet.tzkt.io](https://ghostnet.tzkt.io)
+- [ ] Verify the contract appears on [shadownet.tzkt.io](https://shadownet.tzkt.io)
 - [ ] Test minting a token
 - [ ] Test the blocklist feature (block/unblock an address)
 - [ ] Test withdrawal of claimable balance

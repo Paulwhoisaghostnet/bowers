@@ -53,7 +53,7 @@ export function StepDeploy({
           <h2 className="text-lg font-semibold mb-2">Ready to Deploy</h2>
           <p className="text-sm text-muted-foreground mb-4">
             You&apos;ll be asked to sign the origination transaction in your Beacon wallet.
-            This will create a new contract on the Tezos {isMainnet ? "Mainnet" : "Ghostnet"} network.
+            This will create a new contract on the Tezos {isMainnet ? "Mainnet" : "Shadownet"} network.
             {isMainnet && (
               <span className="block mt-1 text-amber-500 font-medium">
                 This is Mainnet — the transaction will cost real tez.

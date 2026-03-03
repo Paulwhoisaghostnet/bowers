@@ -17,7 +17,7 @@ const MICHELSON_DIR = resolve(__dirname, "../client/src/lib/tezos/michelson");
 const CONSTANTS_FILE = resolve(MICHELSON_DIR, "global-constants.json");
 
 function main() {
-  const network = process.argv[2] || "ghostnet";
+  const network = process.argv[2] || "shadownet";
 
   if (!existsSync(CONSTANTS_FILE)) {
     console.error(`Missing ${CONSTANTS_FILE}. Run register-global-constants.ts first.`);

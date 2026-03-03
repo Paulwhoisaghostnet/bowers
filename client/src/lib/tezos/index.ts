@@ -5,4 +5,4 @@ export { getTokenMetadata, getContractMetadata, parseMichelson } from "./metadat
 export { loadTaquito, loadBeaconWallet, loadMichelCodec, loadTzip12, loadTzip16, loadUtils, RPC_URLS } from "./loaders";
 export { setAllowlist, clearAllowlist, setAllowlistEnd, createAllowlistToken, type AllowlistEntry } from "./allowlist";
 export { createBondingCurveToken, mintBondingCurveEditions } from "./bonding-curve";
-export { blockAddress, unblockAddress, setAdmin, setMintPaused, setMintPrice } from "./blocklist";
+export { blockAddress, unblockAddress, setAdmin, setMintPaused, setMintPrice, setMintEnd } from "./blocklist";

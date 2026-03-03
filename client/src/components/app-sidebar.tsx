@@ -122,14 +122,14 @@ export function AppSidebar() {
               <div className="flex items-center gap-2">
                 <Globe className="w-3.5 h-3.5 text-muted-foreground" />
                 <button
-                  onClick={() => setNetwork(isMainnet ? "ghostnet" : "mainnet")}
+                  onClick={() => setNetwork(isMainnet ? "shadownet" : "mainnet")}
                   className="text-left"
                 >
                   <Badge
                     variant={isMainnet ? "default" : "outline"}
                     className={`text-[10px] cursor-pointer ${isMainnet ? "bg-green-600 hover:bg-green-700" : ""}`}
                   >
-                    {isMainnet ? "Mainnet" : "Ghostnet (Testnet)"}
+                    {isMainnet ? "Mainnet" : "Shadownet (Testnet)"}
                   </Badge>
                 </button>
               </div>

@@ -15,4 +15,4 @@ playwright-report/
 .smartpy-env/
 .venv/
 __pycache__/
-build/smartpy/
+build/smartpy/.cursor/debug*.log

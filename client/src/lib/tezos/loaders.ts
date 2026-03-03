@@ -60,6 +60,6 @@ export async function loadUtils() {
 }
 
 export const RPC_URLS: Record<string, string> = {
-  ghostnet: "https://ghostnet.ecadinfra.com",
+  shadownet: "https://rpc.shadownet.teztnets.com",
   mainnet: "https://mainnet.ecadinfra.com",
 };

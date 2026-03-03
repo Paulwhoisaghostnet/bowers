@@ -13,6 +13,7 @@ export interface IStorage {
   getContractsByOwner(ownerAddress: string): Promise<Contract[]>;
   getContractsByUserId(userId: string): Promise<Contract[]>;
   getContractById(id: string): Promise<Contract | undefined>;
+  getContractByKt1(kt1Address: string): Promise<Contract | undefined>;
   createContract(data: InsertContract): Promise<Contract>;
   incrementTokenCount(id: string): Promise<Contract | undefined>;
 
@@ -50,15 +51,19 @@ export class DatabaseStorage implements IStorage {
 
   async getContractsByUserId(userId: string): Promise<Contract[]> {
     const userWallets = await this.getWalletsByUser(userId);
-    if (userWallets.length === 0) return [];
-    const addresses = userWallets.map((w) => w.address);
+    const addressClauses = userWallets.map((w) => eq(contracts.ownerAddress, w.address));
     return await db.select().from(contracts).where(
-      or(...addresses.map((a) => eq(contracts.ownerAddress, a)))
+      or(eq(contracts.userId, userId), ...addressClauses)
     );
   }
 
   async getContractById(id: string): Promise<Contract | undefined> {
     const [contract] = await db.select().from(contracts).where(eq(contracts.id, id));
+    return contract;
+  }
+
+  async getContractByKt1(kt1Address: string): Promise<Contract | undefined> {
+    const [contract] = await db.select().from(contracts).where(eq(contracts.kt1Address, kt1Address));
     return contract;
   }
 

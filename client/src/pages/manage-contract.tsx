@@ -18,6 +18,10 @@ import {
   Copy,
   Check,
   AlertTriangle,
+  CalendarClock,
+  ListChecks,
+  Trash2,
+  Plus,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,11 +33,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useWallet } from "@/lib/wallet-context";
 import { useNetwork } from "@/lib/network-context";
 import { useToast } from "@/hooks/use-toast";
-import { shortenAddress } from "@/lib/tezos";
-import { blockAddress, unblockAddress, setAdmin, setMintPaused, setMintPrice } from "@/lib/tezos/blocklist";
+import { blockAddress, unblockAddress, setAdmin, setMintPaused, setMintPrice, setMintEnd } from "@/lib/tezos/blocklist";
+import { setAllowlist, clearAllowlist, setAllowlistEnd, type AllowlistEntry } from "@/lib/tezos/allowlist";
 import { withdraw } from "@/lib/tezos/marketplace";
 import { CONTRACT_STYLES } from "@shared/schema";
-import { styleIcons, isMintOnlyStyle, hasCreateTokenFlow } from "./create-collection/types";
+import { styleIcons, hasCreateTokenFlow, hasAllowlistControls, isBondingCurveStyle } from "./create-collection/types";
 import type { Contract } from "@shared/schema";
 
 export default function ManageContract() {
@@ -52,6 +56,18 @@ export default function ManageContract() {
   const [priceTokenId, setPriceTokenId] = useState("");
   const [newPriceTez, setNewPriceTez] = useState("");
   const [copied, setCopied] = useState(false);
+
+  const [mintEndTokenId, setMintEndTokenId] = useState("");
+  const [mintEndDate, setMintEndDate] = useState("");
+
+  const [alTokenId, setAlTokenId] = useState("");
+  const [alEntryAddr, setAlEntryAddr] = useState("");
+  const [alEntryMaxQty, setAlEntryMaxQty] = useState("1");
+  const [alEntryPriceOverride, setAlEntryPriceOverride] = useState("");
+  const [alEntries, setAlEntries] = useState<AllowlistEntry[]>([]);
+  const [alClearTokenId, setAlClearTokenId] = useState("");
+  const [alEndTokenId, setAlEndTokenId] = useState("");
+  const [alEndDate, setAlEndDate] = useState("");
 
   const { data: contract, isLoading } = useQuery<Contract>({
     queryKey: ["/api/contracts/detail", contractId],
@@ -159,6 +175,90 @@ export default function ManageContract() {
     },
   });
 
+  const mintEndMutation = useMutation({
+    mutationFn: async () => {
+      if (!contract) throw new Error("No contract");
+      const end = mintEndDate ? new Date(mintEndDate).toISOString() : null;
+      return setMintEnd(contract.kt1Address, parseInt(mintEndTokenId), end);
+    },
+    onSuccess: (opHash) => {
+      toast({ title: "Mint End Updated", description: `Op: ${opHash.slice(0, 12)}...` });
+      setMintEndDate("");
+      invalidate();
+    },
+    onError: (err: Error) => {
+      toast({ title: "Update Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const alSetMutation = useMutation({
+    mutationFn: async () => {
+      if (!contract) throw new Error("No contract");
+      return setAllowlist(contract.kt1Address, parseInt(alTokenId), alEntries);
+    },
+    onSuccess: (opHash) => {
+      toast({ title: "Allowlist Set", description: `Op: ${opHash.slice(0, 12)}...` });
+      setAlEntries([]);
+      invalidate();
+    },
+    onError: (err: Error) => {
+      toast({ title: "Set Allowlist Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const alClearMutation = useMutation({
+    mutationFn: async () => {
+      if (!contract) throw new Error("No contract");
+      return clearAllowlist(contract.kt1Address, parseInt(alClearTokenId));
+    },
+    onSuccess: (opHash) => {
+      toast({ title: "Allowlist Cleared", description: `Op: ${opHash.slice(0, 12)}...` });
+      setAlClearTokenId("");
+      invalidate();
+    },
+    onError: (err: Error) => {
+      toast({ title: "Clear Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const alEndMutation = useMutation({
+    mutationFn: async () => {
+      if (!contract) throw new Error("No contract");
+      const end = alEndDate ? new Date(alEndDate).toISOString() : null;
+      return setAllowlistEnd(contract.kt1Address, parseInt(alEndTokenId), end);
+    },
+    onSuccess: (opHash) => {
+      toast({ title: "Allowlist End Updated", description: `Op: ${opHash.slice(0, 12)}...` });
+      setAlEndDate("");
+      invalidate();
+    },
+    onError: (err: Error) => {
+      toast({ title: "Update Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const addAlEntry = () => {
+    const addr = alEntryAddr.trim();
+    if (!addr) return;
+    setAlEntries((prev) => [
+      ...prev,
+      {
+        address: addr,
+        max_qty: parseInt(alEntryMaxQty) || 1,
+        price_override: alEntryPriceOverride
+          ? Math.round(parseFloat(alEntryPriceOverride) * 1_000_000)
+          : null,
+      },
+    ]);
+    setAlEntryAddr("");
+    setAlEntryMaxQty("1");
+    setAlEntryPriceOverride("");
+  };
+
+  const removeAlEntry = (idx: number) => {
+    setAlEntries((prev) => prev.filter((_, i) => i !== idx));
+  };
+
   const copyAddress = () => {
     if (contract) {
       navigator.clipboard.writeText(contract.kt1Address);
@@ -192,8 +292,11 @@ export default function ManageContract() {
   const Icon = styleIcons[contract.styleId] || Hexagon;
   const styleName = CONTRACT_STYLES.find((s) => s.id === contract.styleId)?.name ?? contract.styleId;
   const isOwner = address && contract.ownerAddress === address;
-  const mintOnly = isMintOnlyStyle(contract.styleId);
   const hasTokenConfig = hasCreateTokenFlow(contract.styleId);
+  const hasAllowlist = hasAllowlistControls(contract.styleId);
+  const isBonding = isBondingCurveStyle(contract.styleId);
+  const styleMetadata = CONTRACT_STYLES.find((s) => s.id === contract.styleId);
+  const hasSetAdmin = !!styleMetadata?.entrypoints.setAdmin;
 
   if (!isOwner) {
     return (
@@ -247,7 +350,7 @@ export default function ManageContract() {
       </Card>
 
       <Tabs defaultValue="blocklist" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="flex w-full flex-wrap gap-1">
           <TabsTrigger value="blocklist">
             <Shield className="w-3.5 h-3.5 mr-1.5" />
             Blocklist
@@ -258,10 +361,18 @@ export default function ManageContract() {
               Mint Config
             </TabsTrigger>
           )}
-          <TabsTrigger value="admin">
-            <UserCog className="w-3.5 h-3.5 mr-1.5" />
-            Admin
-          </TabsTrigger>
+          {hasAllowlist && (
+            <TabsTrigger value="allowlist">
+              <ListChecks className="w-3.5 h-3.5 mr-1.5" />
+              Allowlist
+            </TabsTrigger>
+          )}
+          {hasSetAdmin && (
+            <TabsTrigger value="admin">
+              <UserCog className="w-3.5 h-3.5 mr-1.5" />
+              Admin
+            </TabsTrigger>
+          )}
           <TabsTrigger value="withdraw">
             <DollarSign className="w-3.5 h-3.5 mr-1.5" />
             Withdraw
@@ -391,7 +502,7 @@ export default function ManageContract() {
                     </div>
                   </div>
 
-                  {!contract.styleId.includes("bonding-curve") && (
+                  {!isBonding && (
                     <div className="rounded-md border p-4 space-y-3">
                       <Label className="text-sm font-medium">Update Mint Price</Label>
                       <div className="flex items-end gap-2">
@@ -433,50 +544,275 @@ export default function ManageContract() {
                       </div>
                     </div>
                   )}
+
+                  <div className="rounded-md border p-4 space-y-3">
+                    <Label className="text-sm font-medium">Set Mint End Date</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Set or clear a deadline after which minting is closed for a token.
+                    </p>
+                    <div className="flex items-end gap-2">
+                      <div className="space-y-1 flex-1">
+                        <Label htmlFor="mintEndTokenId" className="text-xs text-muted-foreground">Token ID</Label>
+                        <Input
+                          id="mintEndTokenId"
+                          type="number"
+                          min={0}
+                          placeholder="0"
+                          value={mintEndTokenId}
+                          onChange={(e) => setMintEndTokenId(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1 flex-1">
+                        <Label htmlFor="mintEndDate" className="text-xs text-muted-foreground">End Date (blank = no deadline)</Label>
+                        <Input
+                          id="mintEndDate"
+                          type="datetime-local"
+                          value={mintEndDate}
+                          onChange={(e) => setMintEndDate(e.target.value)}
+                        />
+                      </div>
+                      <Button
+                        onClick={() => mintEndMutation.mutate()}
+                        disabled={!mintEndTokenId || mintEndMutation.isPending}
+                        size="sm"
+                      >
+                        {mintEndMutation.isPending ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <CalendarClock className="w-4 h-4 mr-1" />
+                        )}
+                        {mintEndDate ? "Set End" : "Clear End"}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </Card>
           </TabsContent>
         )}
 
-        <TabsContent value="admin">
-          <Card className="p-5 space-y-6">
-            <div>
-              <h3 className="text-sm font-semibold mb-1">Transfer Admin Role</h3>
-              <p className="text-xs text-muted-foreground mb-4">
-                Transfer admin ownership of this contract to a new address. This action is irreversible — the new admin will have full control.
-              </p>
+        {hasAllowlist && (
+          <TabsContent value="allowlist">
+            <Card className="p-5 space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold mb-1">Allowlist Management</h3>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Manage the allowlist for phased drops. Allowlisted addresses can mint during the allowlist phase with optional per-address caps and price overrides.
+                </p>
 
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
-                <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-                  <AlertTriangle className="w-4 h-4" />
-                  <span className="text-xs font-medium">This action cannot be undone</span>
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="tz1... (new admin address)"
-                    value={newAdminInput}
-                    onChange={(e) => setNewAdminInput(e.target.value)}
-                    className="font-mono text-xs"
-                  />
-                  <Button
-                    onClick={() => adminMutation.mutate()}
-                    disabled={!newAdminInput.trim() || adminMutation.isPending}
-                    variant="destructive"
-                    size="sm"
-                  >
-                    {adminMutation.isPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <UserCog className="w-4 h-4 mr-1" />
+                <div className="space-y-4">
+                  <div className="rounded-md border p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Plus className="w-4 h-4 text-primary" />
+                      <Label className="text-sm font-medium">Set Allowlist</Label>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="alTokenId" className="text-xs text-muted-foreground">Token ID</Label>
+                      <Input
+                        id="alTokenId"
+                        type="number"
+                        min={0}
+                        placeholder="0"
+                        value={alTokenId}
+                        onChange={(e) => setAlTokenId(e.target.value)}
+                        className="w-28"
+                      />
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <div className="space-y-1 flex-1">
+                        <Label className="text-xs text-muted-foreground">Address</Label>
+                        <Input
+                          placeholder="tz1..."
+                          value={alEntryAddr}
+                          onChange={(e) => setAlEntryAddr(e.target.value)}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1 w-20">
+                        <Label className="text-xs text-muted-foreground">Max Qty</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={alEntryMaxQty}
+                          onChange={(e) => setAlEntryMaxQty(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1 w-28">
+                        <Label className="text-xs text-muted-foreground">Price (tez)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          placeholder="Default"
+                          value={alEntryPriceOverride}
+                          onChange={(e) => setAlEntryPriceOverride(e.target.value)}
+                        />
+                      </div>
+                      <Button variant="outline" size="sm" onClick={addAlEntry} disabled={!alEntryAddr.trim()}>
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                    </div>
+
+                    {alEntries.length > 0 && (
+                      <div className="rounded-md border divide-y">
+                        {alEntries.map((entry, idx) => (
+                          <div key={idx} className="flex items-center justify-between px-3 py-2 text-xs">
+                            <span className="font-mono truncate flex-1">{entry.address}</span>
+                            <span className="text-muted-foreground mx-2">max: {entry.max_qty}</span>
+                            <span className="text-muted-foreground mx-2">
+                              {entry.price_override !== null
+                                ? `${(entry.price_override / 1_000_000).toFixed(2)} tez`
+                                : "default price"}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={() => removeAlEntry(idx)}
+                            >
+                              <Trash2 className="w-3 h-3 text-destructive" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
                     )}
-                    Transfer
-                  </Button>
+
+                    <Button
+                      onClick={() => alSetMutation.mutate()}
+                      disabled={!alTokenId || alEntries.length === 0 || alSetMutation.isPending}
+                      size="sm"
+                    >
+                      {alSetMutation.isPending ? (
+                        <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                      ) : (
+                        <ListChecks className="w-4 h-4 mr-1" />
+                      )}
+                      Set Allowlist ({alEntries.length} {alEntries.length === 1 ? "entry" : "entries"})
+                    </Button>
+                  </div>
+
+                  <div className="rounded-md border p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                      <Label className="text-sm font-medium">Clear Allowlist</Label>
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <div className="space-y-1 flex-1">
+                        <Label htmlFor="alClearTokenId" className="text-xs text-muted-foreground">Token ID</Label>
+                        <Input
+                          id="alClearTokenId"
+                          type="number"
+                          min={0}
+                          placeholder="0"
+                          value={alClearTokenId}
+                          onChange={(e) => setAlClearTokenId(e.target.value)}
+                        />
+                      </div>
+                      <Button
+                        onClick={() => alClearMutation.mutate()}
+                        disabled={!alClearTokenId || alClearMutation.isPending}
+                        variant="destructive"
+                        size="sm"
+                      >
+                        {alClearMutation.isPending ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-4 h-4 mr-1" />
+                        )}
+                        Clear
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <CalendarClock className="w-4 h-4 text-primary" />
+                      <Label className="text-sm font-medium">Set Allowlist End Date</Label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      After this date, public open-edition minting opens for all.
+                    </p>
+                    <div className="flex items-end gap-2">
+                      <div className="space-y-1 flex-1">
+                        <Label htmlFor="alEndTokenId" className="text-xs text-muted-foreground">Token ID</Label>
+                        <Input
+                          id="alEndTokenId"
+                          type="number"
+                          min={0}
+                          placeholder="0"
+                          value={alEndTokenId}
+                          onChange={(e) => setAlEndTokenId(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1 flex-1">
+                        <Label htmlFor="alEndDate" className="text-xs text-muted-foreground">End Date (blank = no end)</Label>
+                        <Input
+                          id="alEndDate"
+                          type="datetime-local"
+                          value={alEndDate}
+                          onChange={(e) => setAlEndDate(e.target.value)}
+                        />
+                      </div>
+                      <Button
+                        onClick={() => alEndMutation.mutate()}
+                        disabled={!alEndTokenId || alEndMutation.isPending}
+                        size="sm"
+                      >
+                        {alEndMutation.isPending ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <CalendarClock className="w-4 h-4 mr-1" />
+                        )}
+                        {alEndDate ? "Set End" : "Clear End"}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </Card>
-        </TabsContent>
+            </Card>
+          </TabsContent>
+        )}
+
+        {hasSetAdmin && (
+          <TabsContent value="admin">
+            <Card className="p-5 space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold mb-1">Transfer Admin Role</h3>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Transfer admin ownership of this contract to a new address. This action is irreversible — the new admin will have full control.
+                </p>
+
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span className="text-xs font-medium">This action cannot be undone</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="tz1... (new admin address)"
+                      value={newAdminInput}
+                      onChange={(e) => setNewAdminInput(e.target.value)}
+                      className="font-mono text-xs"
+                    />
+                    <Button
+                      onClick={() => adminMutation.mutate()}
+                      disabled={!newAdminInput.trim() || adminMutation.isPending}
+                      variant="destructive"
+                      size="sm"
+                    >
+                      {adminMutation.isPending ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <UserCog className="w-4 h-4 mr-1" />
+                      )}
+                      Transfer
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </TabsContent>
+        )}
 
         <TabsContent value="withdraw">
           <Card className="p-5 space-y-6">

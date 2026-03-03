@@ -118,8 +118,10 @@ export default function MintToken() {
       queryClient.invalidateQueries({ queryKey: ["/api/contracts/detail", params?.id] });
       queryClient.invalidateQueries({ queryKey: ["/api/contracts"] });
       toast({
-        title: "Token Minted",
-        description: `"${tokenName}" has been minted successfully!`,
+        title: isCreateToken ? "Token Created" : "Token Minted",
+        description: isCreateToken
+          ? `"${tokenName}" template created — collectors can now mint editions.`
+          : `"${tokenName}" has been minted successfully!`,
       });
       setTokenName("");
       setDescription("");
@@ -227,11 +229,18 @@ export default function MintToken() {
         <div className="lg:col-span-2">
           <div className="flex items-center gap-2 mb-4">
             <Paintbrush className="w-5 h-5 text-primary" />
-            <h2 className="text-lg font-semibold">Mint New Token</h2>
+            <h2 className="text-lg font-semibold">
+              {isCreateToken ? "Create Token Template" : "Mint New Token"}
+            </h2>
           </div>
+          {isCreateToken && (
+            <p className="text-sm text-muted-foreground mb-4">
+              Define the token metadata, pricing, and supply. Once created, collectors can mint editions by paying the mint price.
+            </p>
+          )}
 
           <div className="space-y-5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className={`grid grid-cols-1 ${isCreateToken ? "" : "sm:grid-cols-2"} gap-4`}>
               <div className="space-y-2">
                 <Label htmlFor="tokenName">Token Name *</Label>
                 <Input
@@ -241,20 +250,22 @@ export default function MintToken() {
                   onChange={(e) => setTokenName(e.target.value)}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="editions">Editions</Label>
-                <Input
-                  id="editions"
-                  type="number"
-                  min="1"
-                  placeholder="1"
-                  value={editions}
-                  onChange={(e) => setEditions(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Number of copies to mint
-                </p>
-              </div>
+              {!isCreateToken && (
+                <div className="space-y-2">
+                  <Label htmlFor="editions">Editions</Label>
+                  <Input
+                    id="editions"
+                    type="number"
+                    min="1"
+                    placeholder="1"
+                    value={editions}
+                    onChange={(e) => setEditions(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Number of copies to mint
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -530,8 +541,10 @@ export default function MintToken() {
             >
               <Paintbrush className="w-4 h-4 mr-2" />
               {mintMutation.isPending
-                ? "Minting..."
-                : `Mint ${parseInt(editions) > 1 ? `${editions} Editions` : "Token"}`}
+                ? isCreateToken ? "Creating Token..." : "Minting..."
+                : isCreateToken
+                  ? "Create Token Template"
+                  : `Mint ${parseInt(editions) > 1 ? `${editions} Editions` : "Token"}`}
             </Button>
           </div>
         </div>
@@ -586,7 +599,7 @@ export default function MintToken() {
                       {mimeType}
                     </Badge>
                   )}
-                  {parseInt(editions) > 1 && (
+                  {!isCreateToken && parseInt(editions) > 1 && (
                     <Badge variant="secondary" className="text-[10px]">
                       x{editions}
                     </Badge>

@@ -55,6 +55,9 @@ function PublicRouter() {
 
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth();
+  // #region agent log
+  fetch('http://127.0.0.1:7592/ingest/cea64f23-34db-4732-a847-b206fb4aeec2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f1b6d8'},body:JSON.stringify({sessionId:'f1b6d8',runId:'run2',hypothesisId:'H7',location:'App.tsx:58',message:'AppContent render state',data:{isAuthenticated,isLoading},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   if (isLoading) {
     return (

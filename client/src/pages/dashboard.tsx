@@ -1,13 +1,34 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, ExternalLink, Paintbrush, Download, Hexagon, Settings2 } from "lucide-react";
+import { Plus, ExternalLink, Paintbrush, Download, Hexagon, Settings2, Import } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
 import { shortenAddress } from "@/lib/tezos";
 import { useNetwork } from "@/lib/network-context";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { CONTRACT_STYLES } from "@shared/schema";
 import { styleIcons } from "./create-collection/types";
 import type { Contract } from "@shared/schema";
@@ -134,6 +155,85 @@ function LoadingSkeleton() {
   );
 }
 
+function ImportContractDialog() {
+  const [open, setOpen] = useState(false);
+  const [kt1Address, setKt1Address] = useState("");
+  const [network, setNetwork] = useState("shadownet");
+  const { toast } = useToast();
+
+  const importMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/contracts/import", { kt1Address, network });
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.message || "Import failed");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/contracts/user/me"] });
+      toast({ title: "Contract imported", description: `${kt1Address.slice(0, 12)}... added to your dashboard.` });
+      setKt1Address("");
+      setOpen(false);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Import failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" data-testid="button-import-contract">
+          <Import className="w-4 h-4 mr-2" />
+          Import Existing
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Import Existing Contract</DialogTitle>
+          <DialogDescription>
+            Add a contract you already deployed. Your linked wallet must be the contract admin.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="kt1">Contract Address</Label>
+            <Input
+              id="kt1"
+              placeholder="KT1..."
+              value={kt1Address}
+              onChange={(e) => setKt1Address(e.target.value)}
+              data-testid="input-import-kt1"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="network">Network</Label>
+            <Select value={network} onValueChange={setNetwork}>
+              <SelectTrigger id="network" data-testid="select-import-network">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="shadownet">Shadownet (Testnet)</SelectItem>
+                <SelectItem value="mainnet">Mainnet</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            onClick={() => importMutation.mutate()}
+            disabled={!kt1Address.startsWith("KT1") || importMutation.isPending}
+            data-testid="button-import-submit"
+          >
+            {importMutation.isPending ? "Verifying..." : "Import Contract"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Dashboard() {
   const { isAuthenticated } = useAuth();
   const [, navigate] = useLocation();
@@ -154,12 +254,15 @@ export default function Dashboard() {
             Manage your deployed NFT collection contracts
           </p>
         </div>
-        {contracts && contracts.length > 0 && (
-          <Button onClick={() => navigate("/create")} data-testid="button-create-collection">
-            <Plus className="w-4 h-4 mr-2" />
-            New Collection
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <ImportContractDialog />
+          {contracts && contracts.length > 0 && (
+            <Button onClick={() => navigate("/create")} data-testid="button-create-collection">
+              <Plus className="w-4 h-4 mr-2" />
+              New Collection
+            </Button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (

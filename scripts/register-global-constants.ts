@@ -1,6 +1,6 @@
 /**
  * Register each contract's Michelson code body as a Tezos Global Constant on
- * the target network (default: ghostnet). Outputs a mapping file that
+ * the target network (default: shadownet). Outputs a mapping file that
  * apply-global-constants.ts consumes to produce slim contract modules.
  *
  * Usage:
@@ -17,7 +17,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve } from "path";
 
 const RPC: Record<string, string> = {
-  ghostnet: "https://ghostnet.ecadinfra.com",
+  shadownet: "https://shadownet.tezos.ecadinfra.com",
   mainnet: "https://mainnet.ecadinfra.com",
 };
 
@@ -45,7 +45,7 @@ interface ConstantMapping {
 }
 
 async function main() {
-  const network = process.argv[2] || "ghostnet";
+  const network = process.argv[2] || "shadownet";
   const secretKey = process.env.TEZOS_SECRET_KEY;
   if (!secretKey) {
     console.error("Set TEZOS_SECRET_KEY to a funded account's secret key.");
@@ -54,7 +54,7 @@ async function main() {
 
   const rpcUrl = RPC[network];
   if (!rpcUrl) {
-    console.error(`Unknown network: ${network}. Use ghostnet or mainnet.`);
+    console.error(`Unknown network: ${network}. Use shadownet or mainnet.`);
     process.exit(1);
   }
 

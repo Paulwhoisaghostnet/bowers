@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./auth";
 import { insertContractSchema, mintRequestSchema, CONTRACT_STYLES, insertWalletSchema, insertBowerSchema } from "@shared/schema";
 import { pinFile, pinMetadata } from "./ipfs";
-import { getContractTokens } from "./tzkt";
+import { getContractTokens, getContractStorage, getContractInfo } from "./tzkt";
 
 const ipfsUpload = multer({
   storage: multer.memoryStorage(),
@@ -73,9 +73,75 @@ export async function registerRoutes(app: Express): Promise<void> {
       const userId = req.user.id;
       const parsed = insertContractSchema.parse({ ...req.body, userId });
       const contract = await storage.createContract(parsed);
+
+      // Auto-link the deployer wallet if not already linked
+      if (parsed.ownerAddress) {
+        const existing = await storage.getWalletByAddress(parsed.ownerAddress);
+        if (!existing) {
+          await storage.addWallet({ userId, address: parsed.ownerAddress, label: "Auto-linked on deploy" });
+        }
+      }
+
       res.status(201).json(contract);
     } catch (err: any) {
       res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/contracts/import", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const { kt1Address, network } = req.body as { kt1Address?: string; network?: string };
+
+      if (!kt1Address || !kt1Address.startsWith("KT1")) {
+        return res.status(400).json({ message: "A valid KT1 contract address is required." });
+      }
+
+      const net = network || "shadownet";
+      const existing = await storage.getContractByKt1(kt1Address);
+      if (existing) {
+        return res.status(409).json({ message: "This contract has already been imported." });
+      }
+
+      const [contractStorage, contractInfo] = await Promise.all([
+        getContractStorage(kt1Address, net),
+        getContractInfo(kt1Address, net),
+      ]);
+
+      if (!contractStorage || !contractInfo) {
+        return res.status(404).json({ message: `Contract not found on ${net}. Verify the address and network.` });
+      }
+
+      const onChainAdmin = contractStorage.admin as string | undefined;
+      if (!onChainAdmin) {
+        return res.status(400).json({ message: "Contract does not have an admin field in its storage." });
+      }
+
+      const userWallets = await storage.getWalletsByUser(userId);
+      const userAddresses = userWallets.map((w) => w.address);
+      if (!userAddresses.includes(onChainAdmin)) {
+        return res.status(403).json({
+          message: "You are not the admin of this contract. The admin address does not match any of your linked wallets.",
+        });
+      }
+
+      const name = (contractInfo as any).alias || `Imported ${kt1Address.slice(0, 8)}`;
+      const contract = await storage.createContract({
+        kt1Address,
+        styleId: "imported",
+        styleVersion: "unknown",
+        ownerAddress: onChainAdmin,
+        userId,
+        name,
+        symbol: "NFT",
+        network: net,
+        status: "deployed",
+        tokenCount: 0,
+      });
+
+      res.status(201).json(contract);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
     }
   });
 
@@ -136,7 +202,7 @@ export async function registerRoutes(app: Express): Promise<void> {
         "bowers-mint-allowlist",
         "bowers-mint-bonding-curve",
       ].includes(contract.styleId);
-      const data = await getContractTokens(contract.kt1Address, hasTokenConfig);
+      const data = await getContractTokens(contract.kt1Address, hasTokenConfig, contract.network);
       res.json({ contract, ...data });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

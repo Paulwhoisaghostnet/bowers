@@ -1,9 +1,19 @@
 /**
- * TzKT API helpers for reading on-chain contract data (Ghostnet).
+ * TzKT API helpers for reading on-chain contract data.
+ * Network-aware: pass a network name to target shadownet, mainnet, etc.
  */
 
-const TZKT_BASE = "https://api.ghostnet.tzkt.io/v1";
+const TZKT_BASES: Record<string, string> = {
+  shadownet: "https://api.shadownet.tzkt.io/v1",
+  mainnet: "https://api.tzkt.io/v1",
+};
+const DEFAULT_TZKT_BASE = TZKT_BASES.shadownet;
 const IPFS_GATEWAY = "https://gateway.pinata.cloud/ipfs/";
+
+export function getTzktBase(network?: string): string {
+  if (!network) return DEFAULT_TZKT_BASE;
+  return TZKT_BASES[network] || DEFAULT_TZKT_BASE;
+}
 
 function ipfsToHttp(uri: string): string {
   if (!uri) return "";
@@ -11,8 +21,9 @@ function ipfsToHttp(uri: string): string {
   return uri;
 }
 
-async function tzktFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${TZKT_BASE}${path}`);
+async function tzktFetch<T>(path: string, network?: string): Promise<T> {
+  const base = getTzktBase(network);
+  const res = await fetch(`${base}${path}`);
   if (!res.ok) {
     throw new Error(`TzKT API error: ${res.status} ${res.statusText}`);
   }
@@ -29,10 +40,12 @@ export interface BigMapKey {
 export async function getBigMapKeys(
   contractAddress: string,
   bigmapName: string,
-  limit = 10000
+  limit = 10000,
+  network?: string,
 ): Promise<BigMapKey[]> {
   return tzktFetch<BigMapKey[]>(
-    `/contracts/${contractAddress}/bigmaps/${bigmapName}/keys?limit=${limit}&active=true`
+    `/contracts/${contractAddress}/bigmaps/${bigmapName}/keys?limit=${limit}&active=true`,
+    network,
   );
 }
 
@@ -151,24 +164,25 @@ export interface EnrichedToken {
 
 export async function getContractTokens(
   contractAddress: string,
-  isOpenEdition: boolean
+  isOpenEdition: boolean,
+  network?: string,
 ): Promise<{
   tokens: EnrichedToken[];
   claimable: ClaimableEntry[];
 }> {
   const [tokenMetaKeys, ledgerKeys, listingKeys, offerKeys] =
     await Promise.all([
-      getBigMapKeys(contractAddress, "token_metadata").catch(() => []),
-      getBigMapKeys(contractAddress, "ledger").catch(() => []),
-      getBigMapKeys(contractAddress, "listings").catch(() => []),
-      getBigMapKeys(contractAddress, "offers").catch(() => []),
+      getBigMapKeys(contractAddress, "token_metadata", 10000, network).catch(() => []),
+      getBigMapKeys(contractAddress, "ledger", 10000, network).catch(() => []),
+      getBigMapKeys(contractAddress, "listings", 10000, network).catch(() => []),
+      getBigMapKeys(contractAddress, "offers", 10000, network).catch(() => []),
     ]);
 
-  const claimableKeys = await getBigMapKeys(contractAddress, "claimable").catch(
+  const claimableKeys = await getBigMapKeys(contractAddress, "claimable", 10000, network).catch(
     () => []
   );
   const tokenConfigKeys = isOpenEdition
-    ? await getBigMapKeys(contractAddress, "token_config").catch(() => [])
+    ? await getBigMapKeys(contractAddress, "token_config", 10000, network).catch(() => [])
     : [];
 
   const tokensMap = new Map<number, EnrichedToken>();
@@ -271,4 +285,29 @@ export async function getContractTokens(
   );
 
   return { tokens, claimable };
+}
+
+export async function getContractStorage(
+  contractAddress: string,
+  network?: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    return await tzktFetch<Record<string, unknown>>(
+      `/contracts/${contractAddress}/storage`,
+      network,
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function getContractInfo(
+  contractAddress: string,
+  network?: string,
+): Promise<{ address: string; kind: string; alias?: string; balance: number } | null> {
+  try {
+    return await tzktFetch<any>(`/contracts/${contractAddress}`, network);
+  } catch {
+    return null;
+  }
 }
